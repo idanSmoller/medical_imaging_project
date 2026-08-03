@@ -14,10 +14,53 @@ submission.
 ## Installation
 
 ```bash
+pip install -r requirements.txt
 pip install -e .
 ```
 
 will make a package called `probunet` available in your current Python environment.
+
+
+## Data: LIDC-IDRI crops
+
+```bash
+python scripts/download_lidc.py
+```
+
+Downloads (~215 MB) and extracts the preprocessed LIDC-IDRI 2D crops into `data/lidc/`,
+then checks the result against the published counts and fails loudly on a mismatch:
+
+| split | images | patients |
+| ----- | ------ | -------- |
+| train | 8843   | 530      |
+| val   | 1993   | 111      |
+| test  | 1980   | 103      |
+
+This is DeepMind's release of the crops (CC BY 3.0), published with the
+[Hierarchical Probabilistic U-Net](https://github.com/google-deepmind/deepmind-research/tree/master/hierarchical_probabilistic_unet)
+and linked from the [official Probabilistic U-Net repo](https://github.com/SimonKohl/probabilistic_unet).
+Its preprocessing matches Kohl et al. Appendix H.1 (0.5 mm x 0.5 mm in-plane resample,
+180 x 180 crops centered on the abnormality, polygon-only lesions > 3 mm, graders matched
+by overlapping bounding boxes). The counts differ from the paper's 8882 / 1996 / 1992 by
+about 0.4% because the authors cleaned up the data after publication, stating this
+"leaves the results the same". No TCIA account or `gsutil` is needed.
+
+Usage:
+
+```python
+from probunet.lidc import LIDCCrops
+
+dataset = LIDCCrops(split="train")     # 128x128 random crop, per Appendix H.1
+sample = dataset[0]
+sample["image"]  # FloatTensor [1, 128, 128], values in [0, 1]
+sample["masks"]  # FloatTensor [4, 128, 128], binary, one per grader
+```
+
+The `masks` axis is the `G` axis expected by `probunet.disagreement.compute_disagreement`
+and `DisagreementAwareProbabilisticSegmentationNet.disagreement_losses`. Pass
+`single_random_grader=True` to additionally get `target`, one uniformly drawn grader mask,
+which is how the baseline model draws image-grader pairs during training. 65% of training
+crops have at least one empty mask, since graders disagree on whether a lesion is present.
 
 
 ## Probabilistic U-Net
@@ -43,9 +86,11 @@ The repository includes a small plain-PyTorch baseline runner:
 python scripts/baseline_smoke_train.py --epochs 3 --device cpu
 ```
 
-It trains the original Probabilistic U-Net mechanics on the available local
-lesion sequence NPZ by rasterizing bounding boxes into segmentation masks,
-then saves:
+It trains the original Probabilistic U-Net mechanics on the LIDC crops (after
+running `scripts/download_lidc.py`), drawing one random grader per image as the
+target. It defaults to a small subset (`--max-train` / `--max-val`) and is only a
+wiring check, not a result. Pass `--dataset npz --npz PATH` to instead use a local
+lesion sequence NPZ with bounding boxes rasterized into masks. It saves:
 
 - `outputs/baseline_smoke/baseline_checkpoint.pt`
 - `outputs/baseline_smoke/history.npy`
