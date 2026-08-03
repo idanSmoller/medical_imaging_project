@@ -2,6 +2,30 @@ import inspect
 import numpy as np
 
 
+def disagreement_mae(model_uncertainty, human_disagreement):
+    """Mean absolute error between model and human uncertainty maps."""
+
+    model_uncertainty = np.asarray(model_uncertainty, dtype=np.float32)
+    human_disagreement = np.asarray(human_disagreement, dtype=np.float32)
+    assert_shape(model_uncertainty, human_disagreement)
+    return float(np.mean(np.abs(model_uncertainty - human_disagreement)))
+
+
+def disagreement_correlation(model_uncertainty, human_disagreement, eps=1e-8):
+    """Pearson correlation between flattened uncertainty/disagreement maps."""
+
+    model_uncertainty = np.asarray(model_uncertainty, dtype=np.float32).ravel()
+    human_disagreement = np.asarray(human_disagreement, dtype=np.float32).ravel()
+    assert_shape(model_uncertainty, human_disagreement)
+
+    model_uncertainty = model_uncertainty - model_uncertainty.mean()
+    human_disagreement = human_disagreement - human_disagreement.mean()
+    denom = np.sqrt(np.sum(model_uncertainty ** 2) * np.sum(human_disagreement ** 2))
+    if denom < eps:
+        return np.nan
+    return float(np.sum(model_uncertainty * human_disagreement) / denom)
+
+
 def assert_shape(test, reference):
 
     assert test.shape == reference.shape, "Shape mismatch: {} and {}".format(
@@ -59,7 +83,7 @@ class ConfusionMatrix:
         self.fp = int(((self.test != 0) * (self.reference == 0)).sum())
         self.tn = int(((self.test == 0) * (self.reference == 0)).sum())
         self.fn = int(((self.test == 0) * (self.reference != 0)).sum())
-        self.size = int(np.product(self.reference.shape))
+        self.size = int(np.prod(self.reference.shape))
         self.test_empty = not np.any(self.test)
         self.test_full = np.all(self.test)
         self.reference_empty = not np.any(self.reference)

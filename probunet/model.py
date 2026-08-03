@@ -1,6 +1,12 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
+from probunet.disagreement import (
+    compute_disagreement,
+    disagreement_alignment_loss,
+    model_uncertainty_from_samples,
+)
 from probunet.util import make_onehot as make_onehot_segmentation, make_slices, match_to
 
 
@@ -294,6 +300,7 @@ class InjectionUNet(ConvModule):
         self.coords_dim = coords_dim
 
         self.last_activations = None
+        self.last_features = None
 
         # BUILD ENCODER
         for d in range(self.depth):
@@ -400,6 +407,7 @@ class InjectionUNet(ConvModule):
     def reset(self):
 
         self.last_activations = None
+        self.last_features = None
 
     def forward(self, x, injection=None, reuse_last_activations=False, store_activations=False):
 
@@ -425,6 +433,7 @@ class InjectionUNet(ConvModule):
             for i in reversed(range(self.depth - 1)):
                 x = self._modules["decode-{}".format(i)](torch.cat((enc[-(self.depth - 1 - i)], x), 1))
 
+            self.last_features = x
             if store_activations:
                 self.last_activations = x.detach()
 
@@ -680,3 +689,93 @@ class ProbabilisticSegmentationNet(ConvModule):
         kl = self.kl_divergence()
         nll = nn.NLLLoss(reduction=nll_reduction)(self.reconstruct(sample=None, use_posterior_mean=True, out_device=None), seg.long())
         return - (beta * nll + kl)
+
+
+class DisagreementAwareProbabilisticSegmentationNet(ProbabilisticSegmentationNet):
+    """Probabilistic U-Net with explicit human-disagreement supervision."""
+
+    def __init__(self,
+                 *args,
+                 disagreement_channels=1,
+                 foreground_channel=1,
+                 **kwargs):
+
+        self.disagreement_channels = disagreement_channels
+        self.foreground_channel = foreground_channel
+        super(DisagreementAwareProbabilisticSegmentationNet, self).__init__(*args, **kwargs)
+
+    def make_modules(self):
+
+        super(DisagreementAwareProbabilisticSegmentationNet, self).make_modules()
+        feature_channels = self.task_net.num_feature_maps
+        conv_op = self.task_net.conv_op
+        self.add_module(
+            "disagreement_head",
+            conv_op(feature_channels, self.disagreement_channels, kernel_size=1)
+        )
+
+    def predict_disagreement(self):
+        """Predict human disagreement from the latest U-Net spatial features."""
+
+        if self.task_net.last_features is None:
+            raise ValueError("No stored U-Net features. Run a forward pass before predicting disagreement.")
+        return torch.sigmoid(self.disagreement_head(self.task_net.last_features))
+
+    def sample_prior_train(self, input_, n_samples=4):
+        """Draw differentiable prior samples and decode them for alignment loss."""
+
+        if self.prior is None:
+            self.encode_prior(input_)
+
+        outputs = []
+        for _ in range(n_samples):
+            outputs.append(self.task_net(input_, self.prior.rsample(), reuse_last_activations=False))
+        return torch.stack(outputs, dim=0)
+
+    def disagreement_losses(self,
+                            input_,
+                            masks,
+                            n_samples=4,
+                            lambda_disagreement=1.0,
+                            lambda_alignment=0.0,
+                            eps=1e-6):
+        """Compute auxiliary disagreement-prediction and diversity-alignment losses.
+
+        Args:
+            input_: Image tensor used to encode the prior for sample diversity.
+            masks: Multi-rater binary masks with shape ``(B, G, *spatial)``.
+            n_samples: Number of prior samples used for model uncertainty.
+            lambda_disagreement: Weight for MSE disagreement supervision.
+            lambda_alignment: Weight for uncertainty/disagreement alignment.
+            eps: Numerical stability constant.
+
+        Returns:
+            ``(loss, metrics)`` where metrics contains detached scalar terms and
+            maps useful for logging/visualization.
+        """
+
+        human_disagreement = compute_disagreement(masks, eps=eps)
+        predicted_disagreement = self.predict_disagreement()
+        loss_disagreement = F.mse_loss(predicted_disagreement, human_disagreement.float())
+
+        loss_alignment = predicted_disagreement.new_tensor(0.0)
+        model_uncertainty = None
+        if lambda_alignment != 0.0:
+            samples = self.sample_prior_train(input_, n_samples=n_samples)
+            model_uncertainty = model_uncertainty_from_samples(
+                samples,
+                foreground_channel=self.foreground_channel,
+                eps=eps
+            )
+            loss_alignment = disagreement_alignment_loss(model_uncertainty, human_disagreement)
+
+        loss = lambda_disagreement * loss_disagreement + lambda_alignment * loss_alignment
+        metrics = {
+            "loss_disagreement": loss_disagreement.detach(),
+            "loss_alignment": loss_alignment.detach(),
+            "human_disagreement": human_disagreement.detach(),
+            "predicted_disagreement": predicted_disagreement.detach(),
+        }
+        if model_uncertainty is not None:
+            metrics["model_uncertainty"] = model_uncertainty.detach()
+        return loss, metrics

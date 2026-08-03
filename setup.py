@@ -8,5 +8,5 @@ setup(name='probunet',
       author_email='jens.petersen@dkfz.de',
       license='MIT',
       packages=['probunet'],
-      install_requires=['matplotlib', 'numpy', 'torch', 'trixi', 'batchgenerators'],
+      install_requires=['matplotlib', 'numpy<2', 'torch'],
       zip_safe=False)
