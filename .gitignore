@@ -102,3 +102,19 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# Project-local data, generated outputs, and checkpoints
+instructions/
+outputs/
+data/
+datasets/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.npy
+*.npz
+
+# Local tool state
+.agents/
+.codex/
