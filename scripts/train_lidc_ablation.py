@@ -2,6 +2,7 @@ import argparse
 import csv
 import json
 import os
+import random
 import time
 
 import numpy as np
@@ -276,9 +277,44 @@ def save_checkpoint(path, model, optimizer, step, args, metrics):
             "step": step,
             "args": vars(args),
             "metrics": metrics,
+            "rng_state": {
+                "python": random.getstate(),
+                "numpy": np.random.get_state(),
+                "torch": torch.get_rng_state(),
+                "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            },
         },
         path,
     )
+
+
+def load_checkpoint(path, model, optimizer, device, load_optimizer=True):
+    checkpoint = torch.load(path, map_location=device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    if load_optimizer and "optimizer_state_dict" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    rng_state = checkpoint.get("rng_state")
+    if rng_state is not None:
+        random.setstate(rng_state["python"])
+        np.random.set_state(rng_state["numpy"])
+        torch.set_rng_state(rng_state["torch"])
+        if rng_state.get("cuda") is not None and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(rng_state["cuda"])
+    return checkpoint
+
+
+def best_ged_from_history(path):
+    if not os.path.exists(path):
+        return None
+    values = []
+    with open(path, newline="") as handle:
+        for row in csv.DictReader(handle):
+            if row.get("val_ged") not in (None, ""):
+                values.append(float(row["val_ged"]))
+    if not values:
+        return None
+    return min(values)
 
 
 def main():
@@ -309,6 +345,12 @@ def main():
     parser.add_argument("--eval-samples", type=int, default=16)
     parser.add_argument("--eval-every", type=int, default=1000)
     parser.add_argument("--save-every", type=int, default=1000)
+    parser.add_argument("--resume", default=None, help="Checkpoint to resume from.")
+    parser.add_argument(
+        "--reset-optimizer",
+        action="store_true",
+        help="Load model weights from --resume but start a fresh optimizer.",
+    )
     parser.add_argument("--seed", type=int, default=1)
     args = parser.parse_args()
 
@@ -329,6 +371,30 @@ def main():
         weight_decay=args.weight_decay,
     )
     criterion = nn.NLLLoss()
+    start_step = 1
+    history_path = os.path.join(args.out_dir, "history.csv")
+    best_ged = best_ged_from_history(history_path)
+
+    if args.resume is not None:
+        checkpoint = load_checkpoint(
+            args.resume,
+            model,
+            optimizer,
+            args.device,
+            load_optimizer=not args.reset_optimizer,
+        )
+        resumed_step = int(checkpoint.get("step", 0))
+        start_step = resumed_step + 1
+        if best_ged is None:
+            metrics = checkpoint.get("metrics") or {}
+            best_ged = metrics.get("val_ged")
+        print(
+            "resumed {} from step {}; next step is {}".format(
+                args.resume,
+                resumed_step,
+                start_step,
+            )
+        )
 
     print(
         "{}: {} train / {} {} samples; writing to {}".format(
@@ -340,16 +406,24 @@ def main():
         )
     )
 
-    history_path = os.path.join(args.out_dir, "history.csv")
+    if start_step > args.steps:
+        print(
+            "checkpoint is already at step {}; target --steps is {}, so nothing to do".format(
+                start_step - 1,
+                args.steps,
+            )
+        )
+        return
+
     train_iter = iter(train_loader)
-    best_ged = None
     start = time.time()
 
     progress = tqdm(
-        range(1, args.steps + 1),
+        range(start_step, args.steps + 1),
         desc="train",
         dynamic_ncols=True,
-        initial=0,
+        initial=start_step - 1,
+        total=args.steps,
     )
     for step in progress:
         try:

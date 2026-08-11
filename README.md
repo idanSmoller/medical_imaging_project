@@ -116,6 +116,18 @@ logs Dice, IoU, generalized energy distance, disagreement MAE, and disagreement
 correlation to `history.csv`, and writes `best_checkpoint.pt` / `latest_checkpoint.pt`
 under `outputs/lidc_ablation/<variant>/`.
 
+Resume an interrupted run by pointing `--resume` at the latest checkpoint and keeping
+`--steps` as the final global step you want to reach:
+
+```bash
+python3 scripts/train_lidc_ablation.py --variant full \
+  --resume outputs/lidc_ablation/full/latest_checkpoint.pt \
+  --steps 240000
+```
+
+Pass `--reset-optimizer` only when you want to load model weights but intentionally
+restart Adam state while preserving the global-step learning-rate schedule.
+
 For a fast wiring check:
 
 ```bash

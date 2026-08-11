@@ -143,3 +143,6 @@ Append dated entries. Keep them short — what changed and what the next agent s
   with Appendix B empty-mask handling, plus `scripts/train_lidc_ablation.py` for
   baseline/head/full LIDC runs. Verified one-step CPU smoke runs for all three
   variants using `PYTHONPATH=.`; for normal use run `pip install -e .` first.
+- **2026-08-11 (Codex):** Added `--resume` / `--reset-optimizer` support to
+  `scripts/train_lidc_ablation.py`. New checkpoints include Python, NumPy, Torch,
+  and CUDA RNG state; smoke-tested resume from step 1 to step 2 on CPU.
