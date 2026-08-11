@@ -8,5 +8,5 @@ setup(name='probunet',
       author_email='jens.petersen@dkfz.de',
       license='MIT',
       packages=['probunet'],
-      install_requires=['matplotlib', 'numpy<2', 'Pillow', 'torch'],
+      install_requires=['matplotlib', 'numpy<2', 'Pillow', 'torch', 'tqdm'],
       zip_safe=False)

@@ -98,3 +98,29 @@ lesion sequence NPZ with bounding boxes rasterized into masks. It saves:
 
 For the final disagreement-aware project experiments, prefer adding similarly
 explicit PyTorch scripts under `scripts/`.
+
+## LIDC Ablation Training
+
+`scripts/train_lidc_ablation.py` starts the three planned variants:
+
+```bash
+python3 scripts/train_lidc_ablation.py --variant baseline
+python3 scripts/train_lidc_ablation.py --variant head --lambda-disagreement 0.5
+python3 scripts/train_lidc_ablation.py --variant full --lambda-disagreement 0.5 --lambda-alignment 0.5
+```
+
+The defaults follow the LIDC Appendix H.1 shape where practical: 128 x 128 crops,
+batch size 32, Adam, 1e-4 to 1e-6 stepped learning rate, weight decay 1e-5,
+6-D latent, base 32 channels, and 4 prior samples for the alignment loss. The script
+logs Dice, IoU, generalized energy distance, disagreement MAE, and disagreement
+correlation to `history.csv`, and writes `best_checkpoint.pt` / `latest_checkpoint.pt`
+under `outputs/lidc_ablation/<variant>/`.
+
+For a fast wiring check:
+
+```bash
+python3 scripts/train_lidc_ablation.py --variant full --steps 1 --eval-every 1 \
+  --max-train 2 --max-val 2 --batch-size 1 --eval-batch-size 1 \
+  --feature-maps 2 --latent-size 2 --depth 2 --train-samples 2 --eval-samples 2 \
+  --device cpu --out-dir outputs/lidc_ablation_smoke/full
+```

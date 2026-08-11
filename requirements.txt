@@ -10,6 +10,7 @@ matplotlib>=3.9
 numpy<2          # probunet has not been checked against the numpy 2.x ABI
 Pillow>=10       # reading the LIDC crop PNGs in probunet/lidc.py
 torch>=2.0
+tqdm>=4.66       # progress bars for long training/evaluation scripts
 
 # Optional, legacy: probunet/data.py (the upstream 3D brain-MRI loader) imports
 # batchgenerators. Nothing in the current LIDC pipeline needs it.

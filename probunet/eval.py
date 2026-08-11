@@ -26,6 +26,68 @@ def disagreement_correlation(model_uncertainty, human_disagreement, eps=1e-8):
     return float(np.sum(model_uncertainty * human_disagreement) / denom)
 
 
+def binary_iou_distance(test, reference):
+    """Distance for binary masks used by the Probabilistic U-Net GED metric.
+
+    This is ``1 - IoU`` except when both masks are empty, where the paper's LIDC
+    evaluation defines the distance as zero.
+    """
+
+    test = np.asarray(test) != 0
+    reference = np.asarray(reference) != 0
+    assert_shape(test, reference)
+
+    union = np.logical_or(test, reference).sum()
+    if union == 0:
+        return 0.0
+    intersection = np.logical_and(test, reference).sum()
+    return float(1.0 - (intersection / union))
+
+
+def generalized_energy_distance(samples, references, distance=binary_iou_distance):
+    """Generalized energy distance between sample and annotation sets.
+
+    Args:
+        samples: Iterable/array of predicted binary masks, shape ``(N, *spatial)``.
+        references: Iterable/array of ground-truth binary masks, shape
+            ``(M, *spatial)``.
+        distance: Pairwise distance function. Appendix B uses ``1 - IoU`` with
+            zero distance for pairs of empty masks.
+
+    Returns:
+        The squared GED form used by the Probabilistic U-Net paper:
+        ``2 E[d(S,Y)] - E[d(S,S')] - E[d(Y,Y')]``.
+    """
+
+    samples = np.asarray(samples)
+    references = np.asarray(references)
+    if samples.ndim < 2 or references.ndim < 2:
+        raise ValueError("samples and references must have shape (N, *spatial).")
+    if samples.shape[0] == 0 or references.shape[0] == 0:
+        raise ValueError("samples and references must be non-empty.")
+    if samples.shape[1:] != references.shape[1:]:
+        raise AssertionError(
+            "Shape mismatch: {} and {}".format(samples.shape[1:], references.shape[1:])
+        )
+
+    sample_reference = np.mean([
+        distance(sample, reference)
+        for sample in samples
+        for reference in references
+    ])
+    sample_sample = np.mean([
+        distance(sample_a, sample_b)
+        for sample_a in samples
+        for sample_b in samples
+    ])
+    reference_reference = np.mean([
+        distance(reference_a, reference_b)
+        for reference_a in references
+        for reference_b in references
+    ])
+    return float(2.0 * sample_reference - sample_sample - reference_reference)
+
+
 def assert_shape(test, reference):
 
     assert test.shape == reference.shape, "Shape mismatch: {} and {}".format(

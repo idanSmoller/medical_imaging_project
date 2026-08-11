@@ -124,11 +124,11 @@ differ.
 ## Current state
 
 Done: LIDC download + loader, disagreement utilities (`probunet/disagreement.py`),
-disagreement head and losses (`probunet/model.py`), smoke training on LIDC.
+disagreement head and losses (`probunet/model.py`), smoke training on LIDC,
+generalized energy distance, and a first LIDC ablation training script.
 
-Not done: real training script with the Appendix H.1 schedule; generalized energy
-distance in `probunet/eval.py` (`disagreement_mae` / `disagreement_correlation`
-exist); the ablations in plan Phase 8 (A baseline / B +head / C full, λ ∈ {0.1, 0.5, 1.0}).
+Not done: long ablation runs in plan Phase 8 (A baseline / B +head / C full,
+λ ∈ {0.1, 0.5, 1.0}); final test-set evaluation and qualitative comparison figures.
 
 ## Handoff log
 
@@ -139,3 +139,7 @@ Append dated entries. Keep them short — what changed and what the next agent s
   `DataLoader` and removed a hardcoded absolute NPZ path. Verified counts, tensor
   shapes/ranges, and that disagreement maps are non-trivial. Found the `_l0`–`_l3`
   vs `_l1`–`_l4` discrepancy documented above.
+- **2026-08-11 (Codex):** Added `probunet.eval.generalized_energy_distance`
+  with Appendix B empty-mask handling, plus `scripts/train_lidc_ablation.py` for
+  baseline/head/full LIDC runs. Verified one-step CPU smoke runs for all three
+  variants using `PYTHONPATH=.`; for normal use run `pip install -e .` first.
