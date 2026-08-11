@@ -136,3 +136,22 @@ python3 scripts/train_lidc_ablation.py --variant full --steps 1 --eval-every 1 \
   --feature-maps 2 --latent-size 2 --depth 2 --train-samples 2 --eval-samples 2 \
   --device cpu --out-dir outputs/lidc_ablation_smoke/full
 ```
+
+## Qualitative Figures
+
+After training baseline and full checkpoints, generate Phase 10 comparison figures:
+
+```bash
+python3 scripts/make_lidc_figures.py \
+  --baseline-checkpoint outputs/lidc_ablation/baseline/best_checkpoint.pt \
+  --full-checkpoint outputs/lidc_ablation/full/best_checkpoint.pt \
+  --split test \
+  --num-cases 8 \
+  --out-dir outputs/lidc_figures
+```
+
+By default the script picks test cases with the highest mean human disagreement and
+writes `case_*.png` files containing the input image, four human masks, human
+disagreement, baseline samples/uncertainty, full-model samples/uncertainty, and the
+full model's predicted disagreement map. Use `--indices 0 10 42` to plot specific
+dataset indices instead.
