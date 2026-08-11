@@ -149,3 +149,7 @@ Append dated entries. Keep them short — what changed and what the next agent s
 - **2026-08-11 (Codex):** Added `scripts/make_lidc_figures.py` for Phase 10
   qualitative grids comparing baseline vs. full checkpoints. Smoke-tested on tiny
   val checkpoints; real use should point it at trained `best_checkpoint.pt` files.
+- **2026-08-11 (Codex):** Added
+  `notebooks/disagreement_aware_probunet_colab.ipynb` as the single-notebook Colab
+  entry point. It defaults to `RUN_MODE = "smoke"` so Run All completes quickly;
+  change to `"final"` for 240k-step ablation runs.

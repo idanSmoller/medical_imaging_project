@@ -10,6 +10,11 @@ The legacy experiment-management code has been removed so the project can run
 with a small, explicit PyTorch training loop suitable for Colab and course
 submission.
 
+For the single-notebook submission entry point, use
+`notebooks/disagreement_aware_probunet_colab.ipynb`. It clones/pulls this branch
+in Colab, runs setup, downloads LIDC, trains the ablations, evaluates checkpoints,
+and generates qualitative figures.
+
 
 ## Installation
 
