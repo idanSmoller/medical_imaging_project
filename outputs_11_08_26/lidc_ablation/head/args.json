@@ -24,7 +24,7 @@
   "resume": null,
   "save_every": 1000,
   "seed": 1,
-  "steps": 10000,
+  "steps": 240000,
   "train_samples": 4,
   "variant": "head",
   "weight_decay": 1e-05
