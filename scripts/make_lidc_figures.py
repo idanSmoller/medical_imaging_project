@@ -54,23 +54,40 @@ def sample_model(model, image, n_samples, has_disagreement_head):
     )
 
 
-def disagreement_score(dataset, index):
-    sample = dataset[index]
+def disagreement_score(sample):
     disagreement = compute_disagreement(sample["masks"][None]).numpy()[0, 0]
     return float(disagreement.mean())
 
 
-def choose_indices(dataset, requested_indices, num_cases, selection):
+def case_identity(dataset, index):
+    image_path, _ = dataset.samples[index]
+    patient = os.path.basename(os.path.dirname(image_path))
+    stem = os.path.splitext(os.path.basename(image_path))[0]
+    return patient, stem
+
+
+def load_case(dataset, index):
+    patient, stem = case_identity(dataset, index)
+    return {
+        "index": index,
+        "patient": patient,
+        "stem": stem,
+        "sample": dataset[index],
+    }
+
+
+def choose_cases(dataset, requested_indices, num_cases, selection):
     if requested_indices:
-        return requested_indices[:num_cases]
+        return [load_case(dataset, index) for index in requested_indices[:num_cases]]
     if selection == "first":
-        return list(range(min(num_cases, len(dataset))))
+        return [load_case(dataset, index) for index in range(min(num_cases, len(dataset)))]
 
     scores = []
     for index in tqdm(range(len(dataset)), desc="rank disagreement", dynamic_ncols=True):
-        scores.append((disagreement_score(dataset, index), index))
+        case = load_case(dataset, index)
+        scores.append((disagreement_score(case["sample"]), case))
     scores.sort(reverse=True)
-    return [index for _, index in scores[:num_cases]]
+    return [case for _, case in scores[:num_cases]]
 
 
 def add_panel(ax, image, title, cmap="gray", vmin=None, vmax=None):
@@ -81,6 +98,7 @@ def add_panel(ax, image, title, cmap="gray", vmin=None, vmax=None):
 
 def make_case_figure(
     out_path,
+    title,
     image,
     masks,
     human_disagreement,
@@ -93,6 +111,7 @@ def make_case_figure(
     n_samples = baseline_samples.shape[0]
     ncols = max(6, n_samples + 2)
     fig, axes = plt.subplots(4, ncols, figsize=(2.1 * ncols, 8.2))
+    fig.suptitle(title, fontsize=10)
 
     for ax in axes.ravel():
         ax.axis("off")
@@ -144,7 +163,7 @@ def make_case_figure(
         cmap="magma",
     )
 
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
 
@@ -188,10 +207,11 @@ def main():
         train=False,
         single_random_grader=False,
     )
-    indices = choose_indices(dataset, args.indices, args.num_cases, args.selection)
+    cases = choose_cases(dataset, args.indices, args.num_cases, args.selection)
 
-    for index in tqdm(indices, desc="figures", dynamic_ncols=True):
-        sample = dataset[index]
+    for case in tqdm(cases, desc="figures", dynamic_ncols=True):
+        index = case["index"]
+        sample = case["sample"]
         image = sample["image"][None].to(args.device)
         masks = sample["masks"].numpy()
         human_disagreement = compute_disagreement(sample["masks"][None]).numpy()[0, 0]
@@ -209,9 +229,11 @@ def main():
             has_disagreement_head=True,
         )
 
-        out_path = os.path.join(args.out_dir, "case_{:04d}.png".format(index))
+        out_name = "case_{:04d}_{}_{}.png".format(index, case["patient"], case["stem"])
+        out_path = os.path.join(args.out_dir, out_name)
         make_case_figure(
             out_path,
+            "{} index {} / {} / {}".format(args.split, index, case["patient"], case["stem"]),
             sample["image"][0].numpy(),
             masks,
             human_disagreement,
@@ -221,7 +243,7 @@ def main():
             full_uncertainty,
             predicted_disagreement,
         )
-        print("wrote {}".format(out_path))
+        print("wrote {} from {}/{}".format(out_path, case["patient"], case["stem"]))
 
 
 if __name__ == "__main__":
