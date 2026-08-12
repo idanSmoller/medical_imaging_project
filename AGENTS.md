@@ -169,3 +169,54 @@ Append dated entries. Keep them short — what changed and what the next agent s
   instead of being excluded — this deflates `val_dice` on a dataset where 65% of
   crops have an empty grader mask. Appendix B already handles the empty case for
   GED; the dice path should too.
+- **2026-08-12 (Claude), follow-up:** Two more bugs found on a second audit pass,
+  and all six now fixed. (a) **`InjectionUNet.forward` never called the
+  `reduce-i-nonlin` activations it registers**, so the fcomb was a single affine
+  map; with the latent being (B, L, 1, 1) and broadcast, that made
+  `out1 - out0 = S(x,y) + c(z)`, i.e. **every sample a level set of one function,
+  so all samples were strictly nested** and z could only dilate/erode the mask
+  globally. Verified: spatial std of z's effect was 1.5e-06 against a logit field
+  of 3.2; after the fix it is ~25% of the field. (b) **The alignment loss did not
+  measure sample diversity.** `model_uncertainty_from_samples` is the entropy of
+  the *mean* sample, which 16 identical blurry maps and 16 maximally split crisp
+  maps both score 1.0 — so it is minimised by a single blurry prediction and
+  rewards no diversity at all. That is why the collapsed 240k runs still scored
+  `val_uncertainty_corr` ~0.63 with measured diversity of 0.006. Added
+  `probunet.disagreement.sample_diversity_from_samples` (`H(mean_k p_k) -
+  mean_k H(p_k)`), which is 0 for identical samples and reduces to the same
+  quantity `compute_disagreement` computes over graders when samples are binary.
+  Note this is a flaw in the **plan**, not in the code implementing it: plan §9
+  specifies the entropy-of-mean formula verbatim, while plan §19 defines U as the
+  "variability of multiple segmentation samples" and §22 Q2 rests on that reading.
+  The two only coincide when samples are hard. `--uncertainty-measure` therefore
+  **defaults to `entropy`** (plan-faithful); `mutual-info` is the corrected
+  variant. `history.csv` now also logs
+  `val_diversity_mae` / `val_diversity_corr` alongside the unchanged
+  `val_uncertainty_*`, so the old metric stays comparable. Also fixed mutable
+  class-default kwargs in `InjectionConvEncoder` (`self.conv_kwargs =
+  self._default_conv_kwargs` mutated the class attribute, leaking kwargs into
+  every later instance — harmless with the current configs, live footgun
+  otherwise), and made `make_lidc_figures.choose_indices` dedup by patient.
+  **Before spending a GPU-day, run a short probe and check `loss_kl` stabilises
+  above 0 rather than decaying to it** — that single column is the fastest
+  collapse detector.
+
+  **Phase 8 scope decided (2026-08-12):** four runs, not three — `baseline`,
+  `head`, and `full` *twice*, once per `--uncertainty-measure`
+  (`entropy` = plan §9, `mutual-info` = the §19 reading). The two `full` runs are
+  the ablation that settles plan §22 Q2.
+
+  **Control still needed for plan §22 Q1.** The head's
+  `val_predicted_disagreement_corr` ~0.60 is not yet evidence of anything:
+  disagreement in LIDC sits almost entirely on lesion boundaries, and the
+  boundary band of the majority-vote mask already correlates with `D_GT` at
+  **0.654** on val. Before claiming the head predicts disagreement, compare it
+  against an image-only trivial predictor — the boundary band of the *baseline*
+  model's own segmentation. That is a CPU post-hoc analysis on existing
+  checkpoints, no extra training. Also still unrun: the λ sweep over
+  {0.1, 0.5, 1.0} (plan §7 for λ_D, §13 for λ_A); all runs so far used 0.5/0.5.
+
+  Not bugs but deviations from Appendix H.1, still open: orthogonal init (gain 1)
+  is never applied (`ConvModule.init_weights` exists, nothing calls it); the LR
+  schedule ends at 2.51e-6 rather than 1e-6 because `decay_index` is capped one
+  step short; augmentation is still crop-only.

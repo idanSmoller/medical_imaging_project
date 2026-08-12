@@ -70,7 +70,22 @@ def choose_indices(dataset, requested_indices, num_cases, selection):
     for index in tqdm(range(len(dataset)), desc="rank disagreement", dynamic_ncols=True):
         scores.append((disagreement_score(dataset, index), index))
     scores.sort(reverse=True)
-    return [index for _, index in scores[:num_cases]]
+
+    # LIDC crops are consecutive slices through the same nodule, so the top of this
+    # ranking is one high-disagreement lesion repeated dozens of times -- without
+    # this, "8 cases" is really one case shown 8 times. Take one crop per patient
+    # first, and only reuse patients if that does not fill num_cases.
+    chosen, seen, leftovers = [], set(), []
+    for _, index in scores:
+        patient = os.path.basename(os.path.dirname(dataset.samples[index][0]))
+        if patient in seen:
+            leftovers.append(index)
+            continue
+        seen.add(patient)
+        chosen.append(index)
+        if len(chosen) == num_cases:
+            return chosen
+    return (chosen + leftovers)[:num_cases]
 
 
 def add_panel(ax, image, title, cmap="gray", vmin=None, vmax=None):

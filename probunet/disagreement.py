@@ -75,6 +75,44 @@ def model_uncertainty_from_samples(samples, foreground_channel=1, eps=1e-6, samp
     return _binary_entropy(mean_probability, eps=eps)
 
 
+def sample_diversity_from_samples(samples, foreground_channel=1, eps=1e-6, sample_dim=0):
+    """Disagreement *between* samples: H(mean_k p_k) - mean_k H(p_k).
+
+    ``model_uncertainty_from_samples`` returns only the first term, which is blind
+    to whether the samples actually differ: 16 identical maps at p = 0.5 and 16
+    crisp maps split 8/8 both score 1.0. Subtracting the mean per-sample entropy
+    removes that within-sample blurriness, so this is 0 for identical samples and
+    1 for maximally split ones.
+
+    On binary samples ``H(p_k) = 0``, so this reduces to the same quantity
+    ``compute_disagreement`` computes over graders -- it is the differentiable
+    relaxation that agrees with the human-side definition on hard masks.
+
+    Args and shapes match ``model_uncertainty_from_samples``.
+    """
+
+    if samples.dim() < 5:
+        raise ValueError("Expected samples with shape (K, B, C, *spatial) or (B, K, C, *spatial).")
+
+    if sample_dim != 0:
+        samples = samples.movedim(sample_dim, 0)
+
+    if samples.shape[2] == 1:
+        probabilities = torch.sigmoid(samples)
+    else:
+        probabilities = F.softmax(samples, dim=2)[:, :, foreground_channel:foreground_channel + 1]
+
+    entropy_of_mean = _binary_entropy(probabilities.mean(dim=0), eps=eps)
+    mean_entropy = _binary_entropy(probabilities, eps=eps).mean(dim=0)
+    return (entropy_of_mean - mean_entropy).clamp(min=0.0)
+
+
+UNCERTAINTY_MEASURES = {
+    "entropy": model_uncertainty_from_samples,
+    "mutual-info": sample_diversity_from_samples,
+}
+
+
 def disagreement_alignment_loss(model_uncertainty, human_disagreement):
     """Mean absolute error between model uncertainty and human disagreement."""
 

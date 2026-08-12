@@ -15,6 +15,7 @@ from tqdm.auto import tqdm
 from probunet.disagreement import (
     compute_disagreement,
     model_uncertainty_from_samples,
+    sample_diversity_from_samples,
 )
 from probunet.eval import (
     dice,
@@ -33,6 +34,14 @@ from probunet.model import (
 
 
 VARIANTS = ("baseline", "head", "full")
+
+
+class SummedNLLLoss(nn.Module):
+    """NLL summed over pixels, averaged over the batch (the paper's ELBO scaling)."""
+
+    def forward(self, log_probabilities, target):
+        nll = nn.functional.nll_loss(log_probabilities, target, reduction="none")
+        return nll.reshape(nll.shape[0], -1).sum(dim=1).mean()
 
 
 def limit_dataset(dataset, max_items):
@@ -173,6 +182,7 @@ def train_step(model, batch, optimizer, criterion, args, step):
             n_samples=args.train_samples,
             lambda_disagreement=args.lambda_disagreement,
             lambda_alignment=lambda_alignment,
+            uncertainty_measure=args.uncertainty_measure,
         )
         loss = loss + loss_aux
         log["loss"] = loss.detach()
@@ -201,6 +211,8 @@ def evaluate(model, loader, args):
     ged_scores = []
     disagreement_maes = []
     disagreement_corrs = []
+    diversity_maes = []
+    diversity_corrs = []
     predicted_maes = []
     predicted_corrs = []
 
@@ -217,6 +229,8 @@ def evaluate(model, loader, args):
 
             outputs, prior_masks = sample_masks(model, image, args.eval_samples)
             model_uncertainty = model_uncertainty_from_samples(outputs).cpu().numpy()
+            # Diversity between samples, which val_uncertainty_* cannot see.
+            sample_diversity = sample_diversity_from_samples(outputs).cpu().numpy()
             human_disagreement = compute_disagreement(masks).cpu().numpy()
 
             predicted_disagreement = None
@@ -226,11 +240,15 @@ def evaluate(model, loader, args):
             prior_masks = prior_masks.cpu().numpy().astype(bool)
             for i in range(image.shape[0]):
                 for grader in range(grader_masks.shape[1]):
+                    # nan_for_nonexisting=True excludes empty-prediction/empty-grader
+                    # pairs (np.nanmean drops them) instead of scoring a correct
+                    # "no lesion here" as 0. 65% of crops have >=1 empty grader mask,
+                    # so scoring those as 0 badly deflates the reported dice.
                     dice_scores.append(
-                        dice(pred_mask[i] != 0, grader_masks[i, grader], nan_for_nonexisting=False)
+                        dice(pred_mask[i] != 0, grader_masks[i, grader], nan_for_nonexisting=True)
                     )
                     iou_scores.append(
-                        jaccard(pred_mask[i] != 0, grader_masks[i, grader], nan_for_nonexisting=False)
+                        jaccard(pred_mask[i] != 0, grader_masks[i, grader], nan_for_nonexisting=True)
                     )
                 ged_scores.append(generalized_energy_distance(prior_masks[:, i], grader_masks[i]))
                 disagreement_maes.append(
@@ -238,6 +256,12 @@ def evaluate(model, loader, args):
                 )
                 disagreement_corrs.append(
                     disagreement_correlation(model_uncertainty[i, 0], human_disagreement[i, 0])
+                )
+                diversity_maes.append(
+                    disagreement_mae(sample_diversity[i, 0], human_disagreement[i, 0])
+                )
+                diversity_corrs.append(
+                    disagreement_correlation(sample_diversity[i, 0], human_disagreement[i, 0])
                 )
                 if predicted_disagreement is not None:
                     predicted_maes.append(
@@ -253,6 +277,8 @@ def evaluate(model, loader, args):
         "val_ged": float(np.nanmean(ged_scores)),
         "val_uncertainty_mae": float(np.nanmean(disagreement_maes)),
         "val_uncertainty_corr": float(np.nanmean(disagreement_corrs)),
+        "val_diversity_mae": float(np.nanmean(diversity_maes)),
+        "val_diversity_corr": float(np.nanmean(diversity_corrs)),
     }
     if predicted_maes:
         result["val_predicted_disagreement_mae"] = float(np.nanmean(predicted_maes))
@@ -342,6 +368,19 @@ def main():
     parser.add_argument("--lambda-disagreement", type=float, default=0.5)
     parser.add_argument("--lambda-alignment", type=float, default=0.5)
     parser.add_argument("--train-samples", type=int, default=4)
+    parser.add_argument(
+        "--uncertainty-measure",
+        choices=("entropy", "mutual-info"),
+        default="entropy",
+        help=(
+            "Quantity the alignment loss matches to human disagreement. 'entropy' "
+            "is the plan's section 9 definition (entropy of the mean sample). "
+            "'mutual-info' additionally subtracts the mean per-sample entropy, so "
+            "unlike 'entropy' it is 0 when the samples are identical -- it measures "
+            "the sample variability the plan's section 19 actually asks for. Both "
+            "are logged at eval time regardless of which one is trained against."
+        ),
+    )
     parser.add_argument("--eval-samples", type=int, default=16)
     parser.add_argument("--eval-every", type=int, default=1000)
     parser.add_argument("--save-every", type=int, default=1000)
@@ -370,7 +409,11 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
-    criterion = nn.NLLLoss()
+    # Kohl et al. sum the reconstruction CE over pixels and average over the batch.
+    # nn.NLLLoss()'s default "mean" reduction divides by H*W as well, which shrinks
+    # the reconstruction term ~16k x at 128x128 and makes beta=1 behave like
+    # beta~16000 -- the KL then wins and the posterior collapses onto the prior.
+    criterion = SummedNLLLoss()
     start_step = 1
     history_path = os.path.join(args.out_dir, "history.csv")
     best_ged = best_ged_from_history(history_path)

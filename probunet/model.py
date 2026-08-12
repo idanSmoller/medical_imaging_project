@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from probunet.disagreement import (
+    UNCERTAINTY_MEASURES,
     compute_disagreement,
     disagreement_alignment_loss,
     model_uncertainty_from_samples,
@@ -136,33 +137,33 @@ class InjectionConvEncoder(ConvModule):
         self.feature_map_multiplier = feature_map_multiplier
 
         self.activation_op = activation_op
-        self.activation_kwargs = self._default_activation_kwargs
+        self.activation_kwargs = dict(self._default_activation_kwargs)
         if activation_kwargs is not None:
             self.activation_kwargs.update(activation_kwargs)
 
         self.norm_op = norm_op
-        self.norm_kwargs = self._default_norm_kwargs
+        self.norm_kwargs = dict(self._default_norm_kwargs)
         if norm_kwargs is not None:
             self.norm_kwargs.update(norm_kwargs)
         self.norm_depth = depth if norm_depth == "full" else norm_depth
 
         self.conv_op = conv_op
-        self.conv_kwargs = self._default_conv_kwargs
+        self.conv_kwargs = dict(self._default_conv_kwargs)
         if conv_kwargs is not None:
             self.conv_kwargs.update(conv_kwargs)
 
         self.pool_op = pool_op
-        self.pool_kwargs = self._default_pool_kwargs
+        self.pool_kwargs = dict(self._default_pool_kwargs)
         if pool_kwargs is not None:
             self.pool_kwargs.update(pool_kwargs)
 
         self.dropout_op = dropout_op
-        self.dropout_kwargs = self._default_dropout_kwargs
+        self.dropout_kwargs = dict(self._default_dropout_kwargs)
         if dropout_kwargs is not None:
             self.dropout_kwargs.update(dropout_kwargs)
 
         self.global_pool_op = global_pool_op
-        self.global_pool_kwargs = self._default_global_pool_kwargs
+        self.global_pool_kwargs = dict(self._default_global_pool_kwargs)
         if global_pool_kwargs is not None:
             self.global_pool_kwargs.update(global_pool_kwargs)
 
@@ -447,6 +448,12 @@ class InjectionUNet(ConvModule):
 
         for i in range(self.num_1x1_at_end):
             x = self._modules["reduce-{}".format(i)](x)
+            # Without these the 1x1 stack collapses to a single affine map. Since
+            # the injection is spatially constant, that would make (out1 - out0)
+            # equal S(x, y) + c(z), i.e. every sample a level set of one function,
+            # so all samples come out strictly nested. See Kohl et al.'s fcomb.
+            if i != self.num_1x1_at_end - 1:
+                x = self._modules["reduce-{}-nonlin".format(i)](x)
         if self.output_activation_op is not None:
             x = self._modules["output-activation"](x)
 
@@ -738,7 +745,8 @@ class DisagreementAwareProbabilisticSegmentationNet(ProbabilisticSegmentationNet
                             n_samples=4,
                             lambda_disagreement=1.0,
                             lambda_alignment=0.0,
-                            eps=1e-6):
+                            eps=1e-6,
+                            uncertainty_measure="entropy"):
         """Compute auxiliary disagreement-prediction and diversity-alignment losses.
 
         Args:
@@ -748,6 +756,12 @@ class DisagreementAwareProbabilisticSegmentationNet(ProbabilisticSegmentationNet
             lambda_disagreement: Weight for MSE disagreement supervision.
             lambda_alignment: Weight for uncertainty/disagreement alignment.
             eps: Numerical stability constant.
+            uncertainty_measure: Which quantity the alignment loss matches to the
+                human disagreement map. ``"mutual-info"`` measures disagreement
+                between samples; ``"entropy"`` is the entropy of the mean sample,
+                which a single blurry prediction minimises just as well and so
+                does not actually reward diversity. See
+                ``probunet.disagreement.sample_diversity_from_samples``.
 
         Returns:
             ``(loss, metrics)`` where metrics contains detached scalar terms and
@@ -761,8 +775,16 @@ class DisagreementAwareProbabilisticSegmentationNet(ProbabilisticSegmentationNet
         loss_alignment = predicted_disagreement.new_tensor(0.0)
         model_uncertainty = None
         if lambda_alignment != 0.0:
+            try:
+                measure_fn = UNCERTAINTY_MEASURES[uncertainty_measure]
+            except KeyError:
+                raise ValueError(
+                    "uncertainty_measure must be one of {}, got {!r}".format(
+                        tuple(UNCERTAINTY_MEASURES), uncertainty_measure
+                    )
+                )
             samples = self.sample_prior_train(input_, n_samples=n_samples)
-            model_uncertainty = model_uncertainty_from_samples(
+            model_uncertainty = measure_fn(
                 samples,
                 foreground_channel=self.foreground_channel,
                 eps=eps
