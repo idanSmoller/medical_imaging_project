@@ -111,6 +111,7 @@ instructions/
 outputs/**
 !outputs/**/
 !outputs/**/history.csv
+!outputs/**/args.json
 !outputs/lidc_figures/**/*.png
 data/
 datasets/
