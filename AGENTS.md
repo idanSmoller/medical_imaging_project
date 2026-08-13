@@ -151,5 +151,6 @@ Append dated entries. Keep them short — what changed and what the next agent s
   val checkpoints; real use should point it at trained `best_checkpoint.pt` files.
 - **2026-08-11 (Codex):** Added
   `notebooks/disagreement_aware_probunet_colab.ipynb` as the single-notebook Colab
-  entry point. It defaults to `RUN_MODE = "smoke"` so Run All completes quickly;
-  change to `"final"` for 240k-step ablation runs.
+  entry point with all project code included directly in notebook cells. It
+  defaults to `RUN_MODE = "smoke"` so Run All completes quickly; change to
+  `"final"` for 240k-step ablation runs.
