@@ -76,6 +76,10 @@ def model_uncertainty_from_samples(samples, foreground_channel=1, eps=1e-6, samp
 
 
 def disagreement_alignment_loss(model_uncertainty, human_disagreement):
-    """Mean absolute error between model uncertainty and human disagreement."""
+    """L1 between model uncertainty and human disagreement.
 
-    return F.l1_loss(model_uncertainty, human_disagreement.float())
+    reduction="sum" to match the summed reconstruction NLL -- see the note in
+    ``DisagreementAwareProbabilisticSegmentationNet.disagreement_losses``.
+    """
+
+    return F.l1_loss(model_uncertainty, human_disagreement.float(), reduction="sum")

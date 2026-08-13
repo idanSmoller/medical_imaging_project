@@ -756,7 +756,12 @@ class DisagreementAwareProbabilisticSegmentationNet(ProbabilisticSegmentationNet
 
         human_disagreement = compute_disagreement(masks, eps=eps)
         predicted_disagreement = self.predict_disagreement()
-        loss_disagreement = F.mse_loss(predicted_disagreement, human_disagreement.float())
+        # reduction="sum" to match the summed reconstruction NLL. As a mean this is
+        # ~B*H*W = 5e5 times smaller than loss_seg, so lambda_disagreement * L_D was
+        # ~1e-6 of the total and the head received no gradient at all.
+        loss_disagreement = F.mse_loss(
+            predicted_disagreement, human_disagreement.float(), reduction="sum"
+        )
 
         loss_alignment = predicted_disagreement.new_tensor(0.0)
         model_uncertainty = None
