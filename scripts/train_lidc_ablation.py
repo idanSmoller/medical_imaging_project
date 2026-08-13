@@ -227,10 +227,10 @@ def evaluate(model, loader, args):
             for i in range(image.shape[0]):
                 for grader in range(grader_masks.shape[1]):
                     dice_scores.append(
-                        dice(pred_mask[i] != 0, grader_masks[i, grader], nan_for_nonexisting=False)
+                        dice(pred_mask[i] != 0, grader_masks[i, grader], nan_for_nonexisting=True)
                     )
                     iou_scores.append(
-                        jaccard(pred_mask[i] != 0, grader_masks[i, grader], nan_for_nonexisting=False)
+                        jaccard(pred_mask[i] != 0, grader_masks[i, grader], nan_for_nonexisting=True)
                     )
                 ged_scores.append(generalized_energy_distance(prior_masks[:, i], grader_masks[i]))
                 disagreement_maes.append(
@@ -370,7 +370,7 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
-    criterion = nn.NLLLoss()
+    criterion = nn.NLLLoss(reduction="sum")
     start_step = 1
     history_path = os.path.join(args.out_dir, "history.csv")
     best_ged = best_ged_from_history(history_path)

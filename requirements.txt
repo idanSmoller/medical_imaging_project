@@ -1,10 +1,21 @@
 # Runtime dependencies for probunet and the scripts in scripts/.
 #
+#   pip install -r requirements-gpu.txt   # CUDA machines only — see below
 #   pip install -r requirements.txt
 #   pip install -e .
 #
 # Verified on Python 3.12.4 with torch 2.7.1+cpu, numpy 1.26.4,
-# matplotlib 3.9.1.post1, Pillow 10.4.0.
+# matplotlib 3.9.1.post1, Pillow 10.4.0, and on Python 3.12.10 with
+# torch 2.7.1+cu126 on an L40S (driver 12.6).
+#
+# CUDA: `torch` from PyPI is built against the newest CUDA major version (13 as
+# of writing). On a box with an older driver it installs happily and then reports
+# torch.cuda.is_available() == False with only a UserWarning, so training
+# silently runs on CPU. Check `nvidia-smi` and, for a 12.x driver, install the
+# matching build FIRST via requirements-gpu.txt; the torch>=2.0 line below is
+# then already satisfied and pip leaves it alone. An --extra-index-url here
+# would not help: PyPI carries higher torch versions than the CUDA-specific
+# index, so pip would still resolve to the wrong wheel.
 
 matplotlib>=3.9
 numpy<2          # probunet has not been checked against the numpy 2.x ABI

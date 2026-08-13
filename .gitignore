@@ -105,7 +105,14 @@ venv.bak/
 
 # Project-local data, generated outputs, and checkpoints
 instructions/
-outputs/
+# Ignore everything under outputs/ except training histories and figures.
+# (Negations only work if the parent directories stay un-ignored, hence the
+# `outputs/**` + `!outputs/**/` pair rather than a plain `outputs/`.)
+outputs/**
+!outputs/**/
+!outputs/**/history.csv
+!outputs/**/args.json
+!outputs/lidc_figures/**/*.png
 data/
 datasets/
 checkpoints/

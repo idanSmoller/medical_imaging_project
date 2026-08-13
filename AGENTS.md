@@ -154,3 +154,19 @@ Append dated entries. Keep them short — what changed and what the next agent s
   entry point with all project code included directly in notebook cells. It
   defaults to `RUN_MODE = "smoke"` so Run All completes quickly; change to
   `"final"` for 240k-step ablation runs.
+- **2026-08-12 (Claude):** First full 240k ablation runs finished
+  (`outputs/lidc_ablation/{baseline,head,full}`) and **all three suffer posterior
+  collapse — do not report these numbers.** `loss_kl` decays to exactly 0 by
+  ~30k steps, the prior scale sits at 1.0, and measured sample diversity
+  `E[d(S,S')]` is 0.006 at 240k vs 0.45 at step 1k. Each run's
+  `best_checkpoint.pt` is from step 1000–2000, which is the tell. Val GED
+  therefore *rises* 0.34 → 0.61 while dice improves — the net became
+  deterministic. Likely cause: `train_lidc_ablation.py` uses `nn.NLLLoss()`
+  (reduction `mean`, so per-pixel), while Kohl et al. sum the reconstruction CE
+  over pixels; at 128×128 that under-weights reconstruction ~16k× relative to
+  `beta * KL`, so β = 1 behaves like β ≈ 16000. Fix the reduction (or rescale β)
+  before rerunning. Second issue: `evaluate()` calls `dice`/`jaccard` with
+  `nan_for_nonexisting=False`, so a correct empty-vs-empty prediction scores 0
+  instead of being excluded — this deflates `val_dice` on a dataset where 65% of
+  crops have an empty grader mask. Appendix B already handles the empty case for
+  GED; the dice path should too.
