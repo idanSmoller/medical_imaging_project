@@ -740,14 +740,25 @@ class DisagreementAwareProbabilisticSegmentationNet(ProbabilisticSegmentationNet
         return torch.sigmoid(self.disagreement_head(self.task_net.last_features))
 
     def sample_prior_train(self, input_, n_samples=4):
-        """Draw differentiable prior samples and decode them for alignment loss."""
+        """Draw differentiable prior samples and decode them for alignment loss.
+
+        The prior's parameters are detached on purpose. The alignment loss should
+        shape how the decoder turns z into a segmentation; if it can also reach
+        the prior, the cheapest way for it to raise sample diversity is to inflate
+        the prior variance without bound, which makes KL double every step until
+        it overflows. Detaching leaves the prior to the KL term, as in Kohl et al.
+        """
 
         if self.prior is None:
             self.encode_prior(input_)
 
+        prior = self.latent_distribution(
+            self.prior.loc.detach(), self.prior.scale.detach()
+        )
+
         outputs = []
         for _ in range(n_samples):
-            outputs.append(self.task_net(input_, self.prior.rsample(), reuse_last_activations=False))
+            outputs.append(self.task_net(input_, prior.rsample(), reuse_last_activations=False))
         return torch.stack(outputs, dim=0)
 
     def disagreement_losses(self,

@@ -122,12 +122,28 @@ the code, but you need to know they exist before changing hyperparameters.
    raise sample diversity. KL doubles every step until overflow. 1e-5 is stable
    (KL settles ~43). **The fixed arm therefore uses 1e-5 while the affine arm used
    1e-4 — a second variable between the arms.**
-3. **Prior logvar clamp.** Even at λ_A = 1e-5, `full` NaN'd again at ~4–5k steps:
-   logvar drifts up until `exp(0.5·logvar)` overflows, which gradient clipping
-   cannot prevent because the forward pass produces the inf. `LOGVAR_MIN/MAX =
-   ±10` in `probunet/model.py` clamps it. `full` was relaunched with this clamp
-   and **its result is not in this document** — check
-   `outputs_fcombfix/lidc_ablation/full/history.csv`.
+3. **The prior must be detached in `sample_prior_train`.** Even at λ_A = 1e-5,
+   `full` NaN'd again at ~4–5k steps: logvar drifts up until `exp(0.5·logvar)`
+   overflows, which gradient clipping cannot prevent because the forward pass
+   produces the inf.
+
+   A `logvar.clamp(±10)` was tried first and **made things much worse** — dice
+   0.020 and GED 1.44 at step 1000, versus 0.30 / 0.35 unclamped. `torch.clamp`
+   has zero gradient outside its range, so once logvar saturates the KL term can
+   no longer pull the variance back down; the clamp converts a divergence into an
+   inescapable dead zone. The clamp is still in `model.py` as a cheap safety net
+   (`LOGVAR_MIN/MAX`), but it must never be the thing doing the work.
+
+   The actual fix is in `sample_prior_train`, which now detaches the prior's
+   parameters before sampling. The alignment loss should shape how the *decoder*
+   turns z into a segmentation; letting it reach the prior means the cheapest way
+   to raise sample diversity is to inflate the prior variance without bound. With
+   the prior detached, KL alone governs it — as in Kohl et al. Recovered to dice
+   0.299 / GED 0.571 at step 1000.
+
+   **`full` was relaunched with this fix and its result is not in this document**
+   — check `outputs_fcombfix/lidc_ablation/full/history.csv`, then rerun
+   `scripts/eval_lidc_final.py --runs-dir outputs_fcombfix/lidc_ablation`.
 
 Also note the λ values are not the plan's. Because `L_D` and `L_align` are summed
 over pixels to match the reconstruction, plan §7/§13's λ ∈ {0.1, 0.5, 1.0} would
