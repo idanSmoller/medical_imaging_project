@@ -123,12 +123,18 @@ differ.
 
 ## Current state
 
-Done: LIDC download + loader, disagreement utilities (`probunet/disagreement.py`),
-disagreement head and losses (`probunet/model.py`), smoke training on LIDC,
-generalized energy distance, and a first LIDC ablation training script.
+**Read `RESULTS.md` for the experimental record** — all numbers, the three arms,
+the open questions, and how to get the checkpoints. Summary of where things are:
 
-Not done: long ablation runs in plan Phase 8 (A baseline / B +head / C full,
-λ ∈ {0.1, 0.5, 1.0}); final test-set evaluation and qualitative comparison figures.
+Done: LIDC download + loader, disagreement utilities, disagreement head and
+losses, the full Phase 8 ablation at 240k steps, Phase 9 test-set evaluation
+(`scripts/eval_lidc_final.py`), and Phase 10 qualitative figures.
+
+In flight / not done: the fcomb-fixed rerun's `full` variant was still training
+when RESULTS.md was written — check `outputs_fcombfix/lidc_ablation/full/`. The
+fcomb-fixed vs affine comparison is confounded by the LR schedule (100k vs 240k),
+so the top open task is rerunning the affine arm at 100k. The plan's λ sweep is
+deliberately skipped; see RESULTS.md §6.
 
 ## Handoff log
 
@@ -170,3 +176,44 @@ Append dated entries. Keep them short — what changed and what the next agent s
   instead of being excluded — this deflates `val_dice` on a dataset where 65% of
   crops have an empty grader mask. Appendix B already handles the empty case for
   GED; the dice path should too.
+- **2026-08-15 (Claude):** Phase 9/10 done for the 240k arm, and a fcomb-fixed
+  rerun launched. **Test-set results** (`outputs_12_08_26_240000/final_eval/`,
+  1980 images, 16 samples): baseline dice 0.327 / GED 0.316, head 0.328 / 0.314,
+  full 0.289 / 0.330. **Q1 is positive:** the head's `predD_corr` is 0.617 against
+  an *image-only* trivial control of 0.545 (boundary band of the model's own
+  prediction). An earlier 0.654 figure was the boundary band of the GT majority
+  mask — an oracle, not a fair control; do not use it. **Q2 is marginal:**
+  `unc_corr` 0.584 / 0.597 / 0.608, i.e. +0.024 for full over baseline at a 12%
+  dice cost. The mutual-info metric tracks entropy-of-mean within 0.01, so the
+  "blind metric" concern is minor in practice — **nestedness was the real
+  constraint: 100% of test images had strictly nested samples in all three
+  variants.**
+  New: `scripts/eval_lidc_final.py` (test eval + diversity diagnostics + the
+  trivial control), figure selection now dedups by patient.
+  **Two things bit hard when the fcomb nonlinearity was enabled, both now fixed:**
+  (a) all three variants NaN in the prior encoder within ~2k steps — this branch's
+  `nn.NLLLoss(reduction="sum")` sums over batch *and* pixels, so gradients are
+  ~32x the paper's per-image convention. Added `--grad-clip` (default 100).
+  (b) `full` additionally diverges at `lambda_alignment=1e-4`: KL doubles every
+  step to overflow, because the alignment loss backprops into the prior through
+  `sample_prior_train` and inflating the prior variance is the cheapest way to
+  raise diversity. Probed 1e-5 stable (KL settles ~43); **the rerun uses 1e-5, not
+  the 1e-4 of the 240k arm** — note this when comparing the two arms.
+  Running now in tmux probunet/probunet2/probunet3 on GPU 2/3/5, 100k steps, into
+  `outputs_fcombfix/lidc_ablation/`. When they finish, rerun
+  `scripts/eval_lidc_final.py --runs-dir outputs_fcombfix/lidc_ablation` and
+  compare `nested` and `div_corr` against the 240k arm — that is the real test of
+  plan §22 Q2.
+- **2026-08-15 (Claude), results handoff:** Added **`RESULTS.md`** — the
+  experimental record (all three arms, the test table, the three defects behind
+  the Q2 null, stability gotchas, and how to obtain checkpoints). Read it before
+  touching experiments. Also added `scripts/eval_lidc_final.py` (test eval +
+  diversity/nestedness diagnostics + the image-only Q1 control) and
+  `scripts/run_ablation.sh`. Three code fixes landed with the fcomb change:
+  `--grad-clip` (default 100), a prior/posterior `logvar` clamp at ±10
+  (`LOGVAR_MIN/MAX` in `model.py`), and the `reduce-{i}-nonlin` call in
+  `InjectionUNet.forward`. **`outputs_fcombfix/lidc_ablation/full/` was mid-run at
+  commit time** — its `history.csv` here is a partial snapshot; rerun
+  `scripts/eval_lidc_final.py --runs-dir outputs_fcombfix/lidc_ablation` once it
+  finishes. Checkpoints are gitignored (~5.9 GB); RESULTS.md §8 lists transfer
+  options, but retraining from `args.json` is reproducible and usually easier.

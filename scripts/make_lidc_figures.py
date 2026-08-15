@@ -86,8 +86,24 @@ def choose_cases(dataset, requested_indices, num_cases, selection):
     for index in tqdm(range(len(dataset)), desc="rank disagreement", dynamic_ncols=True):
         case = load_case(dataset, index)
         scores.append((disagreement_score(case["sample"]), case))
-    scores.sort(reverse=True)
-    return [case for _, case in scores[:num_cases]]
+    # key= on the score alone: cases are dicts, so a tie would otherwise try to
+    # compare them and raise.
+    scores.sort(key=lambda item: item[0], reverse=True)
+
+    # LIDC crops are consecutive slices through the same nodule, so the top of this
+    # ranking is one high-disagreement lesion repeated dozens of times -- without
+    # this, "8 cases" is really one case shown 8 times. Take one crop per patient
+    # first, and only reuse patients if that does not fill num_cases.
+    chosen, seen, leftovers = [], set(), []
+    for _, case in scores:
+        if case["patient"] in seen:
+            leftovers.append(case)
+            continue
+        seen.add(case["patient"])
+        chosen.append(case)
+        if len(chosen) == num_cases:
+            return chosen
+    return (chosen + leftovers)[:num_cases]
 
 
 def add_panel(ax, image, title, cmap="gray", vmin=None, vmax=None):

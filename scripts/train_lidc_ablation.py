@@ -180,6 +180,11 @@ def train_step(model, batch, optimizer, criterion, args, step):
         log["loss_alignment"] = aux_metrics["loss_alignment"]
 
     loss.backward()
+    # The reconstruction NLL is summed over batch *and* pixels, so gradients are
+    # ~32x the paper's per-image convention. Without this, all three variants NaN
+    # out in the prior encoder within ~2k steps once the fcomb nonlinearity is in.
+    if args.grad_clip > 0:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
     optimizer.step()
     return {
         key: float(value.detach().cpu()) if torch.is_tensor(value) else value
@@ -342,6 +347,8 @@ def main():
     parser.add_argument("--lambda-disagreement", type=float, default=0.5)
     parser.add_argument("--lambda-alignment", type=float, default=0.5)
     parser.add_argument("--train-samples", type=int, default=4)
+    parser.add_argument("--grad-clip", type=float, default=100.0,
+                        help="Max gradient norm; 0 disables clipping.")
     parser.add_argument("--eval-samples", type=int, default=16)
     parser.add_argument("--eval-every", type=int, default=1000)
     parser.add_argument("--save-every", type=int, default=1000)

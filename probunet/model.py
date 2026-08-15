@@ -10,6 +10,9 @@ from probunet.disagreement import (
 from probunet.util import make_onehot as make_onehot_segmentation, make_slices, match_to
 
 
+LOGVAR_MIN, LOGVAR_MAX = -10.0, 10.0
+
+
 def is_conv(op):
     conv_types = (nn.Conv1d,
                   nn.Conv2d,
@@ -447,6 +450,14 @@ class InjectionUNet(ConvModule):
 
         for i in range(self.num_1x1_at_end):
             x = self._modules["reduce-{}".format(i)](x)
+            # Without these the 1x1 stack collapses to a single affine map. Since
+            # the injection is spatially constant, that makes (out1 - out0) equal
+            # S(x, y) + c(z), i.e. every sample a level set of one function -- so
+            # all samples come out strictly nested and z can only dilate/erode the
+            # mask globally. Measured at 100% nested on the LIDC test set before
+            # this fix. See Kohl et al.'s fcomb.
+            if i != self.num_1x1_at_end - 1:
+                x = self._modules["reduce-{}-nonlin".format(i)](x)
         if self.output_activation_op is not None:
             x = self._modules["output-activation"](x)
 
@@ -593,6 +604,12 @@ class ProbabilisticSegmentationNet(ConvModule):
             mean, logvar = rep
         elif torch.is_tensor(rep):
             mean, logvar = torch.split(rep, rep.shape[1] // 2, dim=1)
+        # Clamped because the alignment loss backprops into the prior and the
+        # cheapest way for it to raise sample diversity is to inflate the prior
+        # variance; unclamped, logvar drifts up until exp() overflows and the
+        # whole encoder goes NaN. exp(0.5*10) ~ 148 is far wider than anything a
+        # 6-D latent needs, so this only ever catches the runaway.
+        logvar = logvar.clamp(LOGVAR_MIN, LOGVAR_MAX)
         self._prior = self.latent_distribution(mean, logvar.mul(0.5).exp())
         return self._prior
 
@@ -607,6 +624,7 @@ class ProbabilisticSegmentationNet(ConvModule):
             mean, logvar = rep
         elif torch.is_tensor(rep):
             mean, logvar = torch.split(rep, rep.shape[1] // 2, dim=1)
+        logvar = logvar.clamp(LOGVAR_MIN, LOGVAR_MAX)
         self._posterior = self.latent_distribution(mean, logvar.mul(0.5).exp())
         return self._posterior
 
