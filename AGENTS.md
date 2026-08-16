@@ -217,3 +217,15 @@ Append dated entries. Keep them short — what changed and what the next agent s
   `scripts/eval_lidc_final.py --runs-dir outputs_fcombfix/lidc_ablation` once it
   finishes. Checkpoints are gitignored (~5.9 GB); RESULTS.md §8 lists transfer
   options, but retraining from `args.json` is reproducible and usually easier.
+- **2026-08-16 (Claude):** fcomb-fixed arm complete (all three variants, 100k).
+  **`full` is now the best variant** — best GED (0.3884), highest `unc_corr`
+  (0.5086) and `predD_corr` (0.6270), at only 4% dice below baseline, versus 12%
+  in the affine arm. **Nestedness dropped 100% → 1–3%.** So plan §22 Q2 flips from
+  null to weakly positive once the latent can vary spatially, and Q1 strengthens
+  to +0.18 over the trivial control. RESULTS.md §4 has the table.
+  **Report `outputs_fcombfix/final_eval_100k/` (matched 100k `latest_checkpoint`),
+  not `outputs_fcombfix/final_eval/`** — best-GED selection picks step 1000
+  (baseline) / 3000 (head) in this arm, i.e. barely-trained models, against step
+  71000 for full; it compares training length, not methods.
+  Cross-arm GED (0.388 vs 0.316) is still confounded by the LR schedule; running
+  the affine arm at 100k remains the top open task.

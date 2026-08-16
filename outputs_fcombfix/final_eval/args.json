@@ -1,0 +1,19 @@
+{
+  "batch_size": 8,
+  "checkpoint_name": "best_checkpoint.pt",
+  "crop_size": 128,
+  "data_root": "data/lidc",
+  "device": "cuda",
+  "eval_samples": 16,
+  "max_test": null,
+  "num_workers": 0,
+  "out_dir": "outputs_fcombfix/final_eval",
+  "runs_dir": "outputs_fcombfix/lidc_ablation",
+  "seed": 1,
+  "split": "test",
+  "variants": [
+    "baseline",
+    "head",
+    "full"
+  ]
+}
