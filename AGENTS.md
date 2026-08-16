@@ -130,11 +130,10 @@ Done: LIDC download + loader, disagreement utilities, disagreement head and
 losses, the full Phase 8 ablation at 240k steps, Phase 9 test-set evaluation
 (`scripts/eval_lidc_final.py`), and Phase 10 qualitative figures.
 
-In flight / not done: the fcomb-fixed rerun's `full` variant was still training
-when RESULTS.md was written — check `outputs_fcombfix/lidc_ablation/full/`. The
-fcomb-fixed vs affine comparison is confounded by the LR schedule (100k vs 240k),
-so the top open task is rerunning the affine arm at 100k. The plan's λ sweep is
-deliberately skipped; see RESULTS.md §6.
+Both ablation arms are complete: affine at 240k and fcomb-fixed at 100k, each
+with a test-set table. Not done: the two arms do not share an LR schedule, so
+their absolute GEDs are not comparable — **rerunning the affine arm at 100k is
+the top open task**. The plan's λ sweep is deliberately skipped; see RESULTS.md §6.
 
 ## Handoff log
 
