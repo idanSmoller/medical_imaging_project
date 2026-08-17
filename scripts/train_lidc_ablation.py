@@ -8,6 +8,7 @@ import time
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import distributions
 from torch.utils.data import DataLoader, Subset
 from tqdm.auto import tqdm
@@ -119,6 +120,68 @@ def make_model(args):
 def kl_loss(model):
     kl = distributions.kl_divergence(model.posterior, model.prior)
     return kl.reshape(kl.shape[0], -1).sum(dim=1).mean()
+
+
+def foreground_probs(samples, foreground_channel=1):
+    if samples.shape[2] == 1:
+        return torch.sigmoid(samples)
+    return F.softmax(samples, dim=2)[:, :, foreground_channel:foreground_channel + 1]
+
+
+def pairwise_soft_dice_distances(samples, masks, eps=1e-6):
+    """Pairwise soft Dice distances between K model samples and G grader masks.
+
+    Args:
+        samples: Logits/log-probabilities with shape ``(K, B, C, H, W)``.
+        masks: Binary grader masks with shape ``(B, G, H, W)``.
+
+    Returns:
+        Tensor with shape ``(B, K, G)``.
+    """
+
+    probs = foreground_probs(samples).squeeze(2).permute(1, 0, 2, 3)
+    masks = masks.float()
+    dims = (-1, -2)
+    intersection = (probs[:, :, None] * masks[:, None]).sum(dim=dims)
+    sample_area = probs.sum(dim=dims)[:, :, None]
+    mask_area = masks.sum(dim=dims)[:, None]
+    dice_score = (2.0 * intersection + eps) / (sample_area + mask_area + eps)
+    return 1.0 - dice_score
+
+
+def softmin(values, dim, tau):
+    return -tau * torch.logsumexp(-values / tau, dim=dim)
+
+
+def coverage_distribution_loss(distances, tau):
+    human_covered = softmin(distances, dim=1, tau=tau).mean()
+    model_valid = softmin(distances, dim=2, tau=tau).mean()
+    return human_covered + model_valid
+
+
+def kernel_distribution_loss(distances, tau):
+    model_to_human = -torch.logsumexp(-distances / tau, dim=2).mean()
+    model_to_human = model_to_human + np.log(distances.shape[2])
+    human_to_model = -torch.logsumexp(-distances / tau, dim=1).mean()
+    human_to_model = human_to_model + np.log(distances.shape[1])
+    return model_to_human + human_to_model
+
+
+def distribution_matching_loss(samples, masks, mode, tau):
+    distances = pairwise_soft_dice_distances(samples, masks)
+    if mode == "coverage":
+        return coverage_distribution_loss(distances, tau), distances
+    if mode == "kernel":
+        return kernel_distribution_loss(distances, tau), distances
+    raise ValueError("unknown distribution matching mode: {}".format(mode))
+
+
+def consensus_loss_from_samples(samples, masks, eps=1e-6):
+    model_mean = foreground_probs(samples).mean(dim=0).squeeze(1)
+    human_mean = masks.float().mean(dim=1)
+    intersection = (model_mean * human_mean).sum(dim=(-1, -2))
+    denominator = model_mean.sum(dim=(-1, -2)) + human_mean.sum(dim=(-1, -2))
+    return (1.0 - (2.0 * intersection + eps) / (denominator + eps)).mean()
 
 
 def set_lr(optimizer, step, args):
