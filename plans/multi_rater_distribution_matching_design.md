@@ -479,27 +479,75 @@ z -> decoded mask -> comparison with annotations
 The proposed `L_dist` is that reconstruction signal, generalized from one label
 to the whole multi-rater annotation set.
 
-## 12. Suggested Practical Next Step
+## 12. Implemented Minimal Experiment
 
-For a future implementation, the lowest-risk version is:
+The branch `multi-rater-distribution-matching` implements the minimal experiment
+inside `scripts/train_lidc_ablation.py`. It keeps the existing Probabilistic
+U-Net prior and decoder as a convenient stochastic mask sampler, but the new
+`distribution` variant does not use random-grader CE, posterior KL, or the old
+uncertainty-alignment loss.
 
-1. Keep the existing prior and decoder.
-2. Sample `K` masks from the prior during training.
-3. Compute soft mask probabilities, not hard argmax masks.
-4. Compute pairwise soft Dice/IoU distances between `K` model samples and four
-   human masks.
-5. Optimize the bidirectional coverage loss.
-6. Keep the disagreement head loss as an auxiliary output.
+Training samples are drawn from the image-conditioned prior with gradients:
 
-First experimental objective:
+```text
+z_k ~ p_theta(z | x)
+S_k = foreground_probability(decoder_theta(x, z_k))
+```
+
+The implemented objective is:
 
 ```text
 L =
-    L_dist
+    lambda_distribution * L_dist(S_1..S_K, M_1..M_4)
+  + lambda_consensus * L_consensus(mean_k S_k, mean_g M_g)
   + lambda_D * MSE(D_hat, D_h)
 ```
 
-Then compare against the current full model on:
+where:
+
+```text
+L_dist = coverage loss from section 8.2
+      or kernel likelihood loss from section 8.3
+
+L_consensus = soft Dice distance between the mean model mask
+              and the mean human mask
+```
+
+Only soft Dice pairwise distances are implemented. IoU distance and additional
+architecture changes are deliberately omitted to keep the notebook-facing change
+small.
+
+The two planned parallel runs differ only in the `L_dist` aggregation:
+
+```bash
+python3 scripts/train_lidc_ablation.py \
+  --variant distribution \
+  --distribution-mode coverage \
+  --steps 100000 \
+  --device cuda \
+  --train-samples 4 \
+  --lambda-distribution 1.0 \
+  --lambda-consensus 0.2 \
+  --lambda-disagreement 0.01 \
+  --distribution-tau 0.1 \
+  --out-dir outputs_distribution/lidc_ablation/coverage
+```
+
+```bash
+python3 scripts/train_lidc_ablation.py \
+  --variant distribution \
+  --distribution-mode kernel \
+  --steps 100000 \
+  --device cuda \
+  --train-samples 4 \
+  --lambda-distribution 1.0 \
+  --lambda-consensus 0.2 \
+  --lambda-disagreement 0.01 \
+  --distribution-tau 0.1 \
+  --out-dir outputs_distribution/lidc_ablation/kernel
+```
+
+Compare both against the fcomb-fixed baseline/full results on:
 
 ```text
 Dice / IoU

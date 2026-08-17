@@ -235,3 +235,11 @@ Append dated entries. Keep them short — what changed and what the next agent s
   (sections 8.2/8.3), and treat disagreement as the entropy/readout of that
   distribution rather than only an auxiliary correction. This is a design note,
   not implemented code yet.
+- **2026-08-17 (Codex):** Implemented the minimal distribution-matching training
+  variant on branch `multi-rater-distribution-matching`. New
+  `--variant distribution` samples from the prior with gradients and trains with
+  `lambda_distribution * L_dist + lambda_consensus * L_consensus +
+  lambda_disagreement * L_D`; it deliberately skips random-grader CE, posterior
+  KL, and old alignment. `--distribution-mode coverage` implements plan §8.2 and
+  `--distribution-mode kernel` implements §8.3, both with soft Dice distances.
+  CPU smoke-tested both modes for one step under `outputs/distribution_smoke/`.
