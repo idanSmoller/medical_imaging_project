@@ -228,3 +228,10 @@ Append dated entries. Keep them short — what changed and what the next agent s
   71000 for full; it compares training length, not methods.
   Cross-arm GED (0.388 vs 0.316) is still confounded by the LR schedule; running
   the affine arm at 100k remains the top open task.
+- **2026-08-17 (Codex):** Created
+  `plans/multi_rater_distribution_matching_design.md` to capture the new theory
+  pivot: model the four LIDC masks as an empirical/smoothed distribution over
+  masks, train model samples with a two-way soft Dice/IoU kernel likelihood
+  (sections 8.2/8.3), and treat disagreement as the entropy/readout of that
+  distribution rather than only an auxiliary correction. This is a design note,
+  not implemented code yet.
