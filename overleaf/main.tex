@@ -13,6 +13,8 @@
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds}
 \usepackage[hidelinks]{hyperref}
 
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
@@ -102,7 +104,11 @@ Aligning Predictive Diversity with Inter-Rater Disagreement}
         $L_{\text{align}}=\frac{1}{HW}\sum_i|U_i-D_i^{GT}|$.
   \item Full objective:
         $L=L_{\text{PU-Net}}+\lambda_D L_D+\lambda_A L_{\text{align}}$.
+    \item Figure~\ref{fig:model} shows both additions in place; everything inside
+        the dashed box is new, everything outside it is the original model.
 \end{itemize}
+
+\input{figure_model}
 
 \paragraph{Keep three quantities distinct (do this throughout the report).}
 \begin{itemize}
@@ -129,9 +135,11 @@ Aligning Predictive Diversity with Inter-Rater Disagreement}
   \item \textbf{A second encoder for the disagreement head.} Rejected: start
         with the minimal $1\times1$ conv so any gain is attributable to the
         \emph{supervision}, not to extra capacity.
-  \item \textbf{Just train on the mean of the four masks.} Rejected: that
+  \item \textbf{Just train on the mean of the four masks.} 
+  Rejected: that
         collapses the distribution back to a single soft target and throws away
         the paper's whole contribution.
+        \todo{Claude: Change this alternative, it misses the point. Add instead an alternative that was already done in the literature}
 \end{itemize}
 
 % ===============================================================
@@ -291,5 +299,6 @@ O.~Ronneberger, P.~Fischer, T.~Brox,
 \emph{U-Net: Convolutional Networks for Biomedical Image Segmentation},
 MICCAI 2015.
 \end{thebibliography}
+
 
 \end{document}
