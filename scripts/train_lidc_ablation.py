@@ -33,7 +33,7 @@ from probunet.model import (
 )
 
 
-VARIANTS = ("baseline", "head", "full")
+VARIANTS = ("baseline", "head", "full", "distribution")
 
 
 def limit_dataset(dataset, max_items):
@@ -184,6 +184,16 @@ def consensus_loss_from_samples(samples, masks, eps=1e-6):
     return (1.0 - (2.0 * intersection + eps) / (denominator + eps)).mean()
 
 
+def differentiable_prior_samples(model, image, n_samples):
+    model.encode_prior(image)
+    outputs = []
+    for _ in range(n_samples):
+        outputs.append(
+            model.task_net(image, model.prior.rsample(), reuse_last_activations=False)
+        )
+    return torch.stack(outputs, dim=0)
+
+
 def set_lr(optimizer, step, args):
     if args.lr_final >= args.lr:
         return args.lr
@@ -213,34 +223,69 @@ def train_step(model, batch, optimizer, criterion, args, step):
     target = batch["target"].long()
     masks = batch["masks"]
 
-    prediction = model(image, target, make_onehot=True, make_onehot_classes=(0, 1))
-    loss_seg = criterion(prediction, target[:, 0].long())
-    loss_kl = kl_loss(model)
-    loss = loss_seg + args.beta * loss_kl
-
-    log = {
-        "step": step,
-        "lr": lr,
-        "loss": loss.detach(),
-        "loss_seg": loss_seg.detach(),
-        "loss_kl": loss_kl.detach(),
-        "loss_disagreement": prediction.new_tensor(0.0),
-        "loss_alignment": prediction.new_tensor(0.0),
-    }
-
-    if args.variant in ("head", "full"):
-        lambda_alignment = args.lambda_alignment if args.variant == "full" else 0.0
-        loss_aux, aux_metrics = model.disagreement_losses(
-            image,
+    if args.variant == "distribution":
+        samples = differentiable_prior_samples(model, image, args.train_samples)
+        loss_distribution, distances = distribution_matching_loss(
+            samples,
             masks,
-            n_samples=args.train_samples,
-            lambda_disagreement=args.lambda_disagreement,
-            lambda_alignment=lambda_alignment,
+            mode=args.distribution_mode,
+            tau=args.distribution_tau,
         )
-        loss = loss + loss_aux
-        log["loss"] = loss.detach()
-        log["loss_disagreement"] = aux_metrics["loss_disagreement"]
-        log["loss_alignment"] = aux_metrics["loss_alignment"]
+        loss_consensus = consensus_loss_from_samples(samples, masks)
+        human_disagreement = compute_disagreement(masks)
+        predicted_disagreement = model.predict_disagreement()
+        loss_disagreement = F.mse_loss(
+            predicted_disagreement, human_disagreement.float(), reduction="sum"
+        )
+        loss = (
+            args.lambda_distribution * loss_distribution
+            + args.lambda_consensus * loss_consensus
+            + args.lambda_disagreement * loss_disagreement
+        )
+        log = {
+            "step": step,
+            "lr": lr,
+            "loss": loss.detach(),
+            "loss_seg": samples.new_tensor(0.0),
+            "loss_kl": samples.new_tensor(0.0),
+            "loss_distribution": loss_distribution.detach(),
+            "loss_consensus": loss_consensus.detach(),
+            "loss_disagreement": loss_disagreement.detach(),
+            "loss_alignment": samples.new_tensor(0.0),
+            "mean_pairwise_distance": distances.detach().mean(),
+        }
+    else:
+        prediction = model(image, target, make_onehot=True, make_onehot_classes=(0, 1))
+        loss_seg = criterion(prediction, target[:, 0].long())
+        loss_kl = kl_loss(model)
+        loss = loss_seg + args.beta * loss_kl
+
+        log = {
+            "step": step,
+            "lr": lr,
+            "loss": loss.detach(),
+            "loss_seg": loss_seg.detach(),
+            "loss_kl": loss_kl.detach(),
+            "loss_distribution": prediction.new_tensor(0.0),
+            "loss_consensus": prediction.new_tensor(0.0),
+            "loss_disagreement": prediction.new_tensor(0.0),
+            "loss_alignment": prediction.new_tensor(0.0),
+            "mean_pairwise_distance": prediction.new_tensor(0.0),
+        }
+
+        if args.variant in ("head", "full"):
+            lambda_alignment = args.lambda_alignment if args.variant == "full" else 0.0
+            loss_aux, aux_metrics = model.disagreement_losses(
+                image,
+                masks,
+                n_samples=args.train_samples,
+                lambda_disagreement=args.lambda_disagreement,
+                lambda_alignment=lambda_alignment,
+            )
+            loss = loss + loss_aux
+            log["loss"] = loss.detach()
+            log["loss_disagreement"] = aux_metrics["loss_disagreement"]
+            log["loss_alignment"] = aux_metrics["loss_alignment"]
 
     loss.backward()
     # The reconstruction NLL is summed over batch *and* pixels, so gradients are
@@ -288,7 +333,7 @@ def evaluate(model, loader, args):
             human_disagreement = compute_disagreement(masks).cpu().numpy()
 
             predicted_disagreement = None
-            if args.variant in ("head", "full"):
+            if args.variant in ("head", "full", "distribution"):
                 predicted_disagreement = model.predict_disagreement().cpu().numpy()
 
             prior_masks = prior_masks.cpu().numpy().astype(bool)
@@ -409,6 +454,10 @@ def main():
     parser.add_argument("--beta", type=float, default=1.0)
     parser.add_argument("--lambda-disagreement", type=float, default=0.5)
     parser.add_argument("--lambda-alignment", type=float, default=0.5)
+    parser.add_argument("--lambda-distribution", type=float, default=1.0)
+    parser.add_argument("--lambda-consensus", type=float, default=0.2)
+    parser.add_argument("--distribution-tau", type=float, default=0.1)
+    parser.add_argument("--distribution-mode", choices=("coverage", "kernel"), default="kernel")
     parser.add_argument("--train-samples", type=int, default=4)
     parser.add_argument("--grad-clip", type=float, default=100.0,
                         help="Max gradient norm; 0 disables clipping.")
