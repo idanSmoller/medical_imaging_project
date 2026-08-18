@@ -270,3 +270,19 @@ Append dated entries. Keep them short — what changed and what the next agent s
   implied a match the model does not achieve; and the `Q^(k)` thumbnails were
   argmax masks although `U` is the entropy of the mean **softmax probability**.
   Rerun it if the reported checkpoint changes.
+- **2026-08-18 (Claude), checkpoint/code trap:** **The `outputs_11_08_26/` and
+  `outputs_12_08_26_*/` checkpoints can no longer be evaluated with current
+  `probunet/model.py`.** The fcomb fix (598e1df) added `reduce-{i}-nonlin`
+  modules to `InjectionUNet.forward`; LeakyReLU has zero parameters, so
+  `load_state_dict` succeeds *silently* while the forward pass now applies
+  activations that were absent during training. Re-evaluating the 240k affine arm
+  this way gave `E[d(S,S')]` 0.356 (step 2k) / 0.233 (step 240k) and GED that
+  *falls* with training, contradicting that run's own `history.csv` — those
+  numbers are artefacts, not results. To re-measure a pre-fix arm you must check
+  out the pre-598e1df code. Consequence for the report: the handoff-log claim
+  "sample diversity fell from 0.45 to 0.006" is **not reproducible** and was
+  removed from `overleaf/main.tex`; the surviving posterior-collapse claims (KL
+  reaches zero by step 31k, val GED rises 0.34 -> 0.61) come from that run's own
+  `history.csv` and are sound.
+  Also: `overleaf/main.tex` is now the **prose** report (6 pages, compiles clean);
+  the bullet-point version is kept as `overleaf/main_bullets.tex.bak`.

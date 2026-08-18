@@ -83,11 +83,14 @@
 \node[lbl] at (9.00,4.05) {Posterior Net};
 
 % U-Net: encoder down, decoder up. Block WIDTH reads as channel count (not to
-% scale, but ordered): last decoder activation 32 ch, broadcast z 6 ch, and the
-% three f_comb 1x1 convs 38->38->38->2. The blue last-activation block and the
-% green z block TOUCH, because concatenation makes them one tensor; f_comb is
-% set off by a gap, because it is a separate computation -- and it is the stage
-% the Section 3 nonlinearity bug lived in.
+% scale, but ordered): last decoder activation 32 ch, broadcast z 6 ch.
+% The blue last-activation block and the green z block TOUCH, because
+% concatenation makes them one tensor; f_comb is set off by a GAP, because it is
+% a separate computation. Both match Fig. 1b of the paper.
+% f_comb is ONE block even though it is three 1x1 convs (38->38->38->2): the
+% paper's caption says "the number of feature map blocks shown is reduced for
+% clarity", and three narrow bars here read as noise. The count lives in the
+% caption instead, which is where Section 3 needs it.
 \fill[fm] (5.66,-1.50) rectangle (5.82,-0.30);
 \fill[fm] (6.06,-1.70) rectangle (6.22,-0.80);
 \fill[fm] (6.46,-1.85) rectangle (6.62,-1.25);
@@ -97,9 +100,7 @@
 \fill[fm] (8.18,-1.50) rectangle (8.34,-0.30);
 \fill[pgreen!55,draw=black!45,line width=0.3pt] (8.34,-1.50) rectangle (8.42,-0.30);
 \fill[fm] (8.62,-1.50) rectangle (8.74,-0.30);
-\fill[fm] (8.80,-1.50) rectangle (8.92,-0.30);
-\fill[fm] (8.98,-1.50) rectangle (9.02,-0.30);
-\node[lbl] at (8.82,-0.06) {$f_{\text{comb}}$};
+\node[lbl] at (8.68,-0.06) {$f_{\text{comb}}$};
 \draw[->,blue!55!black,line width=0.4pt] (5.82,-0.45) -- (8.18,-0.45);
 \draw[->,blue!55!black,line width=0.4pt] (6.22,-0.90) -- (7.78,-0.90);
 \draw[->,blue!55!black,line width=0.4pt] (6.62,-1.35) -- (7.38,-1.35);
@@ -125,9 +126,9 @@
 \draw[loss] (7.30,1.30) -- (8.30,1.30);
 \node[lbl] at (7.80,1.48) {KL};
 \draw[flow] (8.38,0.60) -- (8.38,-0.30);
-\node[lbl,anchor=east] at (8.34,0.04) {Sample $z$};
+\node[lbl,anchor=east] at (8.34,0.18) {Sample $z$};
 \draw[flow] (8.42,-0.90) -- (8.62,-0.90);
-\draw[flow] (9.02,-1.20) -- (10.30,-1.20);
+\draw[flow] (8.74,-1.20) -- (10.30,-1.20);
 \draw[loss] (11.50,-1.20) -- (12.60,-1.20);
 \node[lbl] at (12.05,-0.32) {cross-entropy};
 \draw[flow] (13.21,-0.58) -- (13.21,3.40) -- (9.44,3.40);
@@ -160,7 +161,7 @@
 % NOTE: these K passes re-run the network with z drawn from the PRIOR, not the
 % posterior z that produced the prediction above. Labelled on the arrow itself,
 % because the arrow leaves the decoder and would otherwise imply the same z.
-\draw[oflow] (8.86,-1.50) -- (8.86,-2.50) -- (16.00,-2.50) -- (16.00,0.62);
+\draw[oflow] (8.68,-1.50) -- (8.68,-2.50) -- (16.00,-2.50) -- (16.00,0.62);
 \node[olbl] at (12.00,-2.72) {$K$ passes with $z_k\sim p(z\mid x)$};
 \draw[oflow] (13.82,-1.20) -- (18.20,-1.20);
 \draw[oflow] (16.92,0.90) -- (18.20,0.90);

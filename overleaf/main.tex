@@ -1,9 +1,9 @@
 % ---------------------------------------------------------------
 % Medical Images Processing with Deep Learning (336033) - Project report
-% Max 6 pages. Sections follow the course "Report Guidelines" exactly.
-% Written in bullet points on purpose; every number below is a real
-% measurement from outputs_fcombfix/final_eval_100k/ and
-% outputs_distribution/final_eval_100k/.
+% Prose version. Max 6 pages; sections follow the course Report Guidelines.
+% Every number is a measurement from outputs_fcombfix/final_eval_100k/,
+% outputs_distribution/final_eval_100k/, outputs_12_08_26_10000/ and
+% outputs_11_08_26/. See RESULTS.md for the full experimental record.
 % ---------------------------------------------------------------
 \documentclass[10pt]{article}
 
@@ -15,9 +15,8 @@
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,fit,backgrounds}
 \usepackage[hidelinks]{hyperref}
-\usepackage{enumitem}
-\setlist[itemize]{itemsep=0.5pt,topsep=1pt,parsep=0pt,leftmargin=1.3em}
-\setlength{\abovedisplayskip}{3pt}\setlength{\belowdisplayskip}{3pt}
+\setlength{\abovedisplayskip}{4pt}\setlength{\belowdisplayskip}{4pt}
+\setlength{\parskip}{1pt}
 
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 \newcommand{\Dgt}{D^{\mathrm{GT}}}
@@ -29,242 +28,200 @@
 
 \begin{document}
 \maketitle
-\vspace{-1.5em}
+\vspace{-1.8em}
+
+\begin{center}
+\begin{minipage}{0.93\textwidth}\small
+\textbf{Selected paper.} S.~A.~A. Kohl et al., \emph{A Probabilistic U-Net for
+Segmentation of Ambiguous Images}, NeurIPS 2018~\cite{kohl2018}.\\
+\textbf{Proposed extension.} We supervise \emph{where} human annotators disagree.
+A single-convolution head predicts the inter-rater disagreement map from the
+image alone, and an alignment loss drives the model's own sample diversity into
+those same pixels.
+\end{minipage}
+\end{center}
+\vspace{0.4em}
 
 % ===============================================================
-\section*{Title page details}
-\begin{itemize}
-  \item \textbf{Selected paper:} S.~Kohl et al., \emph{A Probabilistic U-Net for
-        Segmentation of Ambiguous Images}, NeurIPS 2018.
-  \item \textbf{Proposed extension:} supervise \emph{where} human annotators
-        disagree, with (i) a head that predicts the inter-rater disagreement map
-        from the image alone and (ii) a loss that pushes the model's own sample
-        diversity into those same pixels.
-  \item \textbf{Headline outcome:} the head clearly works ($+0.20$ correlation
-        over a trivial control); the alignment loss gives a small but consistent
-        gain ($+0.026$) at the best generalized energy distance of our arms. A
-        fourth arm that replaces the paper's objective with direct
-        distribution matching wins on Dice but collapses to zero sample
-        diversity --- a negative result we report and explain.
-\end{itemize}
+\section{Introduction}\label{sec:intro}
+
+Semantic segmentation assigns a label to every pixel of an image, and training
+normally assumes that each image has one correct mask. In medical imaging that
+assumption does not hold. Several qualified experts asked to outline the same
+lesion will produce visibly different masks, and on the LIDC-IDRI lung-nodule
+dataset they sometimes disagree about whether a lesion is present at all. A
+conventional U-Net trained on one expert's mask, or on the average of several,
+returns a single confident segmentation and discards this information precisely
+where it is most clinically relevant.
+
+The Probabilistic U-Net addresses this by combining a U-Net with a conditional
+variational autoencoder. A prior network maps the image $x$ to a distribution
+$p(z\mid x)$ over a low-dimensional latent space; each draw of $z$ is decoded
+into a different plausible segmentation. The samples are coherent whole masks
+rather than independent per-pixel probabilities, which is the paper's central
+design argument: a pixel-wise probability map cannot express which pixels vary
+\emph{together}, and so cannot represent two distinct but internally consistent
+interpretations of the same image. Training minimises the negative evidence lower
+bound, in which a posterior $q(z\mid x,Y_g)$ additionally observes one randomly
+chosen expert mask $Y_g$,
+\[
+  L_{\text{PU-Net}}
+  = \underbrace{\mathrm{E}_{z\sim q(z\mid x,Y_g)}\!\left[-\log p(Y_g\mid x,z)\right]}
+      _{\text{reconstruction (cross-entropy, summed over pixels)}}
+    \;+\; \beta\,\underbrace{D_{\mathrm{KL}}\!\left(q(z\mid x,Y_g)\,\|\,p(z\mid x)\right)}
+      _{\text{pulls the prior towards the posterior}} ,
+\]
+so that at test time sampling from the prior alone reproduces the variability
+seen across annotators. The balance between the two terms is consequential:
+Section~\ref{sec:results} reports how an incorrect reduction of the
+reconstruction term collapses the posterior onto the prior and removes the
+model's stochasticity entirely.
+
+The resulting distribution of segmentations is scored with the generalized energy
+distance. Writing $S,S'$ for independent model samples and $Y,Y'$ for independent
+grader masks,
+\[
+  D^2_{\mathrm{GED}}
+  = 2\,\mathrm{E}\!\left[d(S,Y)\right]
+    - \underbrace{\mathrm{E}\!\left[d(S,S')\right]}_{\text{sample diversity}}
+    - \mathrm{E}\!\left[d(Y,Y')\right],
+  \qquad d = 1-\mathrm{IoU},
+\]
+where $\mathrm{IoU}(A,B)=|A\cap B|/|A\cup B|$ is the intersection over union of
+two binary masks.
+
+We chose this paper because LIDC-IDRI provides four independent expert masks per
+image, which makes inter-rater disagreement directly measurable rather than
+merely assumed --- a rare property among segmentation datasets. It also exposes a
+specific gap. Every term of $D^2_{\mathrm{GED}}$ is a scalar:
+$\mathrm{E}[d(S,S')]$ measures how \emph{much} the model's samples vary and
+$\mathrm{E}[d(Y,Y')]$ how much the graders vary, but nothing in the metric asks
+\emph{where} in the image that variation falls. A model could therefore produce
+the right amount of variability in entirely the wrong places and score just as
+well as one that does not. Answering the ``where'' question requires the two
+spatial maps that lie behind those scalars, and comparing them is what we add.
 
 % ===============================================================
-\section{Introduction}
+\section{Proposed extension}\label{sec:ext}
 
-\paragraph{The problem, for a reader new to the task.}
-\begin{itemize}
-  \item Segmentation labels every pixel (here: is this pixel part of a lung
-        nodule?), and training normally assumes one correct mask per image. In
-        medical imaging that assumption is false: experts outline the same lesion
-        differently, and on LIDC-IDRI they sometimes disagree about whether a
-        lesion is there at all.
-  \item A standard U-Net trained on one expert's mask, or on their average, emits
-        a single confident mask and destroys that information.
-\end{itemize}
+Three quantities must be kept distinct. The first, $\Dgt$, is \emph{human}
+disagreement, computed from the four masks alone. With
+$P_i=\frac{1}{G}\sum_g Y_i^{(g)}$ the per-pixel mean over $G=4$ graders, $\Dgt$
+is its normalised binary entropy,
+\[
+  \Dgt_i=-\frac{P_i\log(P_i+\epsilon)+(1-P_i)\log(1-P_i+\epsilon)}{\log 2}\in[0,1],
+\]
+which is $0$ wherever all four graders agree and $1$ where they split two against
+two. The second, $\hat D$, is our model's \emph{prediction} of $\Dgt$. The third,
+$U$, is \emph{model} uncertainty: we draw $K$ latents from the prior, decode each
+into a foreground-probability map $Q^{(k)}$, average them into
+$\bar Q_i=\frac{1}{K}\sum_k Q_i^{(k)}$, and apply the same functional,
+\[
+  U_i=-\frac{\bar Q_i\log(\bar Q_i+\epsilon)+(1-\bar Q_i)\log(1-\bar Q_i+\epsilon)}{\log 2}.
+\]
+Because $U$ and $\Dgt$ differ only in what is averaged --- model samples in one
+case, grader votes in the other --- any discrepancy between them is a discrepancy
+of location on a common $[0,1]$ scale, which is what makes $|U-\Dgt|$ a
+meaningful quantity to minimise.
 
-\paragraph{What the paper does.}
-\begin{itemize}
-  \item The Probabilistic U-Net combines a U-Net with a conditional VAE. A prior
-        network maps the image $x$ to a distribution $p(z\mid x)$ over a
-        low-dimensional latent (6-D here); every draw of $z$ decodes to a
-        different plausible segmentation --- a \emph{coherent whole mask}. That is
-        the paper's central design choice: it argues explicitly against pixel-wise
-        probability maps, because they cannot express which pixels vary
-        \emph{together}.
-  \item Training minimises the negative ELBO. A posterior $q(z\mid x,Y_g)$
-        additionally sees \emph{one randomly chosen} expert mask $Y_g$:
-        \[
-          L_{\text{PU-Net}}
-          = \underbrace{\mathrm{E}_{z\sim q(z\mid x,Y_g)}\!\left[-\log p(Y_g\mid x,z)\right]}
-              _{\text{reconstruction (cross-entropy, summed over pixels)}}
-            \;+\; \beta\,\underbrace{D_{\mathrm{KL}}\!\left(q(z\mid x,Y_g)\,\|\,p(z\mid x)\right)}
-              _{\text{pulls the prior towards the posterior}} .
-        \]
-        The balance between the two terms is not cosmetic: Section~5 describes how
-        getting the reconstruction's reduction wrong collapses the posterior onto
-        the prior and destroys sampling entirely.
-  \item Sampling $z$ repeatedly therefore yields a \emph{distribution} of
-        segmentations, scored against the four expert masks with the
-        \textbf{generalized energy distance}. Writing $S,S'$ for independent
-        model samples and $Y,Y'$ for independent grader masks,
-        \[
-          D^2_{\mathrm{GED}}
-          = 2\,\mathrm{E}\!\left[d(S,Y)\right]
-            - \underbrace{\mathrm{E}\!\left[d(S,S')\right]}_{\text{sample diversity}}
-            - \mathrm{E}\!\left[d(Y,Y')\right],
-          \qquad d = 1-\mathrm{IoU} .
-        \]
-\end{itemize}
-
-\paragraph{Why it matters, and why we chose it.}
-\begin{itemize}
-  \item In nodule screening the disputed cases are the clinically interesting
-        ones: a model that says ``experts would argue \emph{here}'' is more useful
-        as a second reader than one that draws a confident wrong boundary. LIDC
-        ships \textbf{four} expert masks per image, so disagreement is directly
-        measurable --- rare among segmentation datasets.
-  \item \textbf{The gap --- read the middle term of $D^2_{\mathrm{GED}}$ twice.}
-        Every term of GED is a \emph{scalar}: $\mathrm{E}[d(S,S')]$ says how
-        \emph{much} the model's samples vary and $\mathrm{E}[d(Y,Y')]$ how much the
-        graders vary, but nothing in it says \emph{where}. A model could put the
-        right \emph{amount} of variability in the wrong \emph{places} and score
-        just as well. The ``where'' question needs the two \emph{maps} behind those
-        scalars --- $U$ for the samples, $\Dgt$ for the graders (Section~2) --- and
-        comparing them pixel by pixel is precisely what we add.
-\end{itemize}
-
-% ===============================================================
-\section{Proposed extension}
-
-\paragraph{Three quantities, kept distinct throughout the report.}
-\begin{itemize}
-  \item $\Dgt$ --- \emph{human} disagreement, computed from the four masks.
-        With $P_i=\frac{1}{G}\sum_g Y_i^{(g)}$ the per-pixel mean over $G=4$
-        graders, $\Dgt$ is its normalized binary entropy
-        \[
-          \Dgt_i=-\frac{P_i\log(P_i+\epsilon)+(1-P_i)\log(1-P_i+\epsilon)}{\log 2}\in[0,1],
-        \]
-        so $\Dgt=0$ where all four agree and $1$ where they split two-two.
-  \item $\hat D$ --- the \emph{prediction} of $\Dgt$ made by our new head.
-  \item $U$ --- \emph{model} uncertainty. Draw $K$ latents from the prior, decode
-        each to a foreground-probability map $Q^{(k)}$, and average them into
-        $\bar Q_i=\frac{1}{K}\sum_k Q_i^{(k)}$. Then $U$ is the \emph{same
-        functional} as $\Dgt$, with the $K$ samples playing the role of the $G$
-        graders:
-        \[
-          U_i=-\frac{\bar Q_i\log(\bar Q_i+\epsilon)+(1-\bar Q_i)\log(1-\bar Q_i+\epsilon)}{\log 2}.
-        \]
-        Using one functional on both sides is what makes ``$U\approx\Dgt$'' a
-        claim about \emph{where} uncertainty sits rather than a comparison of
-        two different units.
-\end{itemize}
-
-\paragraph{What we add (two pieces, both minimal on purpose).}
-\begin{itemize}
-  \item \textbf{(B) Disagreement head.} One $1{\times}1$ convolution $+$ sigmoid
-        on the last U-Net feature map, tapped \emph{before} $z$ is injected, so
-        $\hat D$ is a function of the image alone. Trained with
-        $L_D=\mathrm{MSE}(\hat D,\Dgt)$.
-  \item \textbf{(C) Alignment loss.} $L_{\text{align}}=\frac{1}{HW}\sum_i|U_i-\Dgt_i|$,
-        penalising predictive diversity that lands anywhere other than where the
-        graders differ. Full objective
-        $L=L_{\text{PU-Net}}+\lambda_D L_D+\lambda_A L_{\text{align}}$; in
-        Figure~\ref{fig:model} everything in the dashed box is new.
-\end{itemize}
+Our extension adds two components, both deliberately minimal. The
+\textbf{disagreement head} is a single $1\times1$ convolution followed by a
+sigmoid, applied to the last U-Net feature map and tapped \emph{before} the
+latent $z$ is injected, so that $\hat D$ is a function of the image alone; it is
+trained with $L_D=\mathrm{MSE}(\hat D,\Dgt)$. The \textbf{alignment loss}
+$L_{\text{align}}=\frac{1}{HW}\sum_i|U_i-\Dgt_i|$ penalises predictive diversity
+that lands anywhere other than where the graders differ. The full objective is
+$L=L_{\text{PU-Net}}+\lambda_D L_D+\lambda_A L_{\text{align}}$, and
+Figure~\ref{fig:model} shows both additions in place.
 
 \input{figure_model}
 
-\paragraph{Where our addition sits: a marginal readout on a joint model.}
-\begin{itemize}
-  \item $\Dgt$ and $U$ are per-pixel \emph{marginals} --- projections of the joint
-        distribution over masks. We do not swap one object for the other: the CVAE
-        still owns the joint (the KL keeps the prior wide and the samples
-        coherent), and $L_{\text{align}}$ only says \emph{where} the marginal
-        variance should sit. $U$ is computed from the $K$ decoded samples, so it
-        is a \emph{readout} of that distribution, not a parallel pixel-wise model.
-  \item Four masks pin the per-pixel Bernoulli down exactly --- with $G=4$, $\Dgt$
-        can only take the values $\{0,\,0.81,\,1\}$ --- but say very little about
-        the joint. A marginal constraint is roughly all the labels can support.
-  \item \textbf{Caveat we state rather than gloss:} $\hat D$ \emph{is} a pixel-wise
-        predictor, a $1{\times}1$ conv on image features with no sample involved.
-        It is an auxiliary output \emph{alongside} the sample-based segmentation,
-        never a substitute for it.
-\end{itemize}
+It is worth being precise about how these additions relate to the original
+design. $\Dgt$ and $U$ are per-pixel marginals: projections of the joint
+distribution over masks that the paper deliberately models. We do not substitute
+one object for the other. The conditional VAE continues to own the joint --- the
+KL term keeps the prior broad and the decoded samples internally coherent --- and
+$L_{\text{align}}$ constrains only where the marginal variance is located. $U$ is
+computed from the $K$ decoded samples, so it is a readout of that distribution
+rather than a parallel pixel-wise model. Four masks determine the per-pixel
+Bernoulli exactly, so that with $G=4$ the map $\Dgt$ takes only the values
+$\{0,\,0.81,\,1\}$, but they say very little about the joint; a marginal
+constraint is close to all that four annotations can support. The head $\hat D$
+is genuinely pixel-wise, a $1\times1$ convolution on image features with no
+sample involved, and functions as an auxiliary output alongside the sample-based
+segmentation rather than as a replacement for it.
 
-\paragraph{Hypothesis, as two testable claims.}
-\begin{itemize}
-  \item \textbf{Q1.} Where annotators will disagree is predictable from the image
-        alone: $\hat D\approx\Dgt$, beating a trivial ``just outline the lesion''
-        control.
-  \item \textbf{Q2.} Adding $L_{\text{align}}$ raises the agreement between $U$
-        and $\Dgt$ over the baseline, without damaging segmentation quality or GED.
-\end{itemize}
+This yields two testable claims. \textbf{Q1:} where annotators will disagree is
+predictable from the image alone, so that $\hat D$ approximates $\Dgt$ and
+outperforms a trivial predictor that merely marks lesion boundaries.
+\textbf{Q2:} adding $L_{\text{align}}$ increases the agreement between $U$ and
+$\Dgt$ relative to the baseline without degrading segmentation quality or the
+energy distance.
 
-\paragraph{Alternatives we considered.}
-\begin{itemize}
-  \item \textbf{Condition the prior on disagreement}, $p(z\mid x,\hat D)$.
-        Rejected: $\hat D$ is itself a deterministic function of $x$, so it adds
-        no information and confounds the ablation.
-  \item \textbf{A dedicated multi-rater architecture.} MRNet~\cite{ji2021}
-        models rater (dis)agreement with an expertise-aware module and extra
-        branches. Rejected for this project: with a single $1{\times}1$
-        convolution, any gain is attributable to the \emph{supervision signal}
-        rather than to added capacity.
-  \item \textbf{Per-rater heads / confusion matrices}~\cite{zhang2020}. Rejected:
-        the LIDC release does not identify which radiologist produced which mask
-        and the four raters differ across scans, so a per-rater parameterisation
-        has nothing stable to learn.
-  \item \textbf{Replace the ELBO with direct distribution matching.} Treat the
-        four masks as an empirical distribution and train the $K$ samples to match
-        it with a two-way soft-Dice loss --- close in spirit to
-        MoSE~\cite{gao2023}, which matches a segmentation distribution to the
-        annotation set with a Wasserstein-like loss on LIDC. Rather than only
-        discussing it, \textbf{we implemented and ran it as a fourth arm} (D).
-\end{itemize}
+We considered three alternatives. Conditioning the prior on disagreement,
+$p(z\mid x,\hat D)$, was rejected because $\hat D$ is a deterministic function of
+$x$ and therefore contributes no new information while confounding the ablation.
+Per-rater output heads or annotator confusion matrices~\cite{zhang2020} were
+rejected because the LIDC release does not identify which radiologist produced
+which mask and the four raters differ from scan to scan, leaving a per-rater
+parameterisation nothing stable to learn. The third alternative, replacing the
+ELBO with direct distribution matching, treats the four masks as an empirical
+distribution and trains the $K$ samples to match it through a two-way soft-Dice
+loss. This is close in spirit to MoSE~\cite{gao2023}, which matches a
+segmentation distribution to an annotation set with a Wasserstein-like loss on
+the same dataset. Rather than dismiss it on paper, we implemented it and ran it
+as a fourth arm; Section~\ref{sec:results} reports the outcome.
 
 % ===============================================================
-\section{Methodology}
+\section{Methodology}\label{sec:method}
 
-\paragraph{Model.}
-\begin{itemize}
-  \item Faithful PyTorch re-implementation of the Probabilistic U-Net (the
-        official repo is old TensorFlow and does not run on current Colab):
-        U-Net backbone with base 32 channels and 4 down/up-samplings, prior
-        encoder, posterior encoder, 6-D latent, and \texttt{fcomb}-style
-        injection of $z$ into the final $1{\times}1$ convolution stack.
-  \item Our additions live in a subclass, so the baseline stays runnable for a
-        controlled comparison.
-  \item \textbf{A bug in our own re-implementation, worth reporting.} The final
-        $1{\times}1$ stack initially had no nonlinearity between its convolutions,
-        so it collapsed to a single affine map; since the injected $z$ is
-        spatially constant, every sample became a level set of one function and
-        $z$ could only globally grow or shrink one mask. Measured effect:
-        \textbf{100\% of test images had strictly nested samples.} Adding the
-        missing activation dropped that to 1--3\%, and is what let any
-        diversity-shaping loss work at all.
-\end{itemize}
+\paragraph{Model.} We reimplemented the Probabilistic U-Net in PyTorch, the
+official release being an older TensorFlow codebase that does not run on current
+Colab. The architecture follows the original: a U-Net backbone with 32 base
+channels and four down- and up-sampling stages, a prior encoder, a posterior
+encoder, a six-dimensional latent, and \texttt{fcomb}-style injection of $z$
+into the final $1\times1$ convolution stack. Our additions live in a subclass, so
+the unmodified baseline remains runnable and every arm shares one code path.
 
-\paragraph{Data.}
-\begin{itemize}
-  \item LIDC-IDRI 2D crops, DeepMind's preprocessed release (CC BY 3.0)
-        published with the Hierarchical Probabilistic U-Net~\cite{kohl2019};
-        preprocessing follows the original paper's Appendix H.1.
-  \item Splits: 8843 train / 1993 val / 1980 test images (530 / 111 / 103
-        patients), $180\times180$ 8-bit grayscale, four masks each. We take a
-        random $128\times128$ crop, scale images to $[0,1]$ and binarise masks.
-        These counts are $\sim$0.4\% below the 8882 / 1996 / 1992 quoted in the
-        paper, because the authors cleaned the data after publication and the 2018
-        snapshot was never released; we therefore cite the HPU-Net release and do
-        not claim a byte-identical reproduction.
-  \item \textbf{Roughly 65\% of training crops contain at least one empty mask}
-        --- graders disagree about lesion \emph{existence}, not only about the
-        boundary. This is signal, not corruption, and it is why the
-        \emph{empty-mask convention} defined in Section~5 matters.
-\end{itemize}
+\paragraph{Data.} We use the LIDC-IDRI 2D crops from DeepMind's preprocessed
+release (CC BY 3.0), published with the Hierarchical Probabilistic
+U-Net~\cite{kohl2019}, whose preprocessing follows Appendix H.1 of the original
+paper. The splits contain 8843 training, 1993 validation and 1980 test images
+from 530, 111 and 103 patients respectively; images are $180\times180$ 8-bit
+grayscale with four masks each. We take a random $128\times128$ crop, scale
+images to $[0,1]$ and binarise the masks. These counts are up to 0.6\% below the
+8882 / 1996 / 1992 reported in the paper, because the authors cleaned the dataset
+after publication and the 2018 snapshot was never released; the numbers here
+refer to the HPU-Net release. Roughly 65\% of training crops contain at least one
+empty mask, reflecting disagreement about lesion \emph{existence} rather than
+boundary placement, which is why the empty-mask convention of
+Section~\ref{sec:results} matters.
 
-\paragraph{Training.}
-\begin{itemize}
-  \item Loss: summed cross-entropy reconstruction $+\ \beta\,\mathrm{KL}$
-        ($\beta=1$, 6-D latent, per Appendix H.1), plus $\lambda_D L_D$ and
-        $\lambda_A L_{\text{align}}$ for arms B and C.
-  \item Adam, lr $10^{-4}$ decayed to $10^{-6}$ in 5 steps, batch 32, weight
-        decay $10^{-5}$, gradient-norm clipping at 100, $K=4$ samples per step,
-        16 samples per image at test time; augmentation is the random translated
-        crop only.
-  \item \textbf{100k steps per arm} (the paper uses 240k), one GPU,
-        $\approx$3.7\,h for A/B, $\approx$6.6\,h for C, $\approx$6.0\,h for D.
-  \item $\lambda_D=0.01$ and $\lambda_A=10^{-5}$; both are load-bearing.
-        $L_D$ is summed over pixels, so $\lambda_D=0.5$ makes it $\sim$3$\times$
-        the reconstruction term; and $\lambda_A=10^{-4}$ diverges within 2k steps
-        because inflating the prior variance is the cheapest way to raise
-        diversity (Section~5).
-  \item Tools: Python, PyTorch, NumPy, Matplotlib. The submitted code runs in
-        Google Colab: a self-contained notebook executes the whole pipeline
-        end-to-end in a reduced ``smoke'' mode, and the same code paths, run at
-        full length on one GPU, produced every number below.
-\end{itemize}
+\paragraph{Training.} The objective, optimiser and schedule are taken unchanged
+from the original paper: the reconstruction cross-entropy summed over pixels,
+$\beta=1$ with a six-dimensional latent, Adam with learning rate $10^{-4}$
+decayed to $10^{-6}$ in five steps, batch size 32 and weight decay $10^{-5}$.
+None of these were tuned, and every arm runs them identically, which is what
+allows the results table to be read as an ablation: a difference between arms
+cannot be an artefact of optimiser search, because no such search was performed.
 
-\paragraph{Ablation design (one variable at a time).}
+Four choices were ours. We train for 100k steps rather than the paper's 240k, a
+computational constraint; absolute energy distances consequently sit above
+published values, and only the relative ordering of arms trained to an identical
+budget is meaningful. We set $\lambda_D=0.01$ and $\lambda_A=10^{-5}$ after
+running short 10k-step trials across a range of values, which showed that the
+auxiliary terms buy little and cost a great deal: raising $\lambda_A$ to
+$10^{-3}$ improved the uncertainty correlation by roughly $0.02$ while Dice fell
+from $0.30$ to $0.12$, and $10^{-4}$ became unstable once the \texttt{fcomb} was
+corrected, so we kept the smallest weights that still had a measurable effect.
+We clip the gradient norm at 100 and clamp the latent log-variance to $\pm10$,
+both required for numerical stability as described in Section~\ref{sec:results}.
+Augmentation is limited to the random translated crop; the paper additionally
+applies elastic deformation, rotation, shearing and scaling. Training draws
+$K=4$ samples per step, and evaluation uses 16 samples per image.
+
+\paragraph{Ablation design.} Four arms vary one component at a time.
+
 \begin{center}\small
 \begin{tabular}{llll}
 \toprule
@@ -278,52 +235,58 @@ D -- distribution matching & yes & no &
 \bottomrule
 \end{tabular}
 \end{center}
-\begin{itemize}
-  \item \textbf{Arm D in detail.} The ELBO is dropped entirely (no random-grader
-        cross-entropy, no posterior, no KL). Instead $K$ samples are drawn from
-        the prior \emph{with gradients}, and a $K\times G$ matrix of soft-Dice
-        distances to the four masks is reduced two ways:
-        \emph{coverage} (every human mask must be matched by some sample and
-        vice versa, via a soft minimum) or \emph{kernel} (a two-way soft kernel
-        likelihood). $L_{\text{con}}$ is a soft Dice between the mean sample and
-        the mean human mask. Both modes are reported.
-\end{itemize}
+
+Arm D discards the ELBO entirely: there is no random-grader cross-entropy, no
+posterior and no KL term. Instead $K$ samples are drawn from the prior with
+gradients, and a $K\times G$ matrix of soft-Dice distances to the four masks is
+reduced in one of two ways. The \emph{coverage} form requires every human mask to
+be matched by some sample and every sample to resemble some human mask, through a
+soft minimum; the \emph{kernel} form uses a two-way soft kernel likelihood.
+$L_{\text{con}}$ is a soft Dice between the mean sample and the mean human mask.
+Both modes are reported.
+
+\paragraph{Tools.} Python, PyTorch, NumPy and Matplotlib. The submitted code runs
+in Google Colab as a self-contained notebook that executes the whole pipeline
+end-to-end in a reduced ``smoke'' configuration; the same code paths, run at full
+length, produced every number reported below.
 
 % ===============================================================
-\section{Results and analysis}
+\section{Results and analysis}\label{sec:results}
 
-\paragraph{Metrics, and what each is for.}
-\begin{itemize}
-  \item \textbf{Dice / IoU} --- sanity check that the extension does not damage
-        segmentation quality, computed on the deterministic prediction against
-        each of the four masks. \emph{Not} the headline claim.
-  \item \textbf{Generalized energy distance (GED)}, the paper's own metric,
-        defined in Section~1: our 16 samples against the four human masks, with
-        $d=1-\mathrm{IoU}$. We evaluate it under the \textbf{empty-mask
-        convention} of the paper's Appendix~B --- $d\equiv0$ when both masks are
-        empty, so agreeing that there is no lesion is rewarded rather than
-        punished. We apply the same convention to Dice/IoU by excluding
-        empty-vs-empty pairs instead of scoring them 0; without it the 65\% of
-        crops with an empty mask deflate every model and hide real differences.
-  \item \textbf{$\mathrm{corr}(U,\Dgt)$} --- does the model become uncertain in
-        the same places humans disagree? \textbf{This is the primary result.}
-  \item \textbf{Trivial control} --- disagreement in LIDC sits largely on lesion
-        boundaries, so a map that merely marks the boundary already correlates with
-        $\Dgt$. Ours is the 5\,px \emph{boundary band} (dilation $-$ erosion) of
-        \textbf{the model's own predicted mask} --- roughly 2\,px inside and 2\,px
-        outside its edge. It uses no grader information whatever, so unlike a band
-        drawn around the ground truth it is available at inference. $\hat D$ must
-        beat it to have learned anything about \emph{raters} rather than about
-        outlines.
-  \item \textbf{Diversity diagnostics} --- the subtracted $\mathrm{E}[d(S,S')]$
-        term of GED, reported on its own, and the fraction of images whose samples
-        are strictly nested. Together they separate ``diverse in the wrong place''
-        from ``not diverse at all''.
-\end{itemize}
+\paragraph{Metrics.} Dice and IoU, with
+$\mathrm{Dice}(A,B)=2|A\cap B|/(|A|+|B|)$, serve as a check that the extension
+does not damage segmentation quality; they are computed on the deterministic
+prediction against each of the four masks and are not the headline claim. The
+generalized energy distance, defined in Section~\ref{sec:intro}, compares our 16
+samples with the four human masks. Both it and Dice are evaluated under the
+empty-mask convention of the paper's Appendix~B: IoU and Dice are both $0/0$ when
+two masks are empty, so the paper defines $d\equiv0$ in that case, and agreement
+that no lesion is present is rewarded rather than penalised. We apply the
+corresponding rule to Dice and IoU by excluding empty-versus-empty pairs instead
+of scoring them zero; without it, the 65\% of crops containing an empty mask
+depress every model equally and mask real differences. The correlation
+$\mathrm{corr}(U,\Dgt)$ --- whether the model becomes uncertain in the same
+places humans disagree --- is the primary result.
 
-\paragraph{Main table.} Held-out test split, 1980 images, 16 samples per image,
-all arms read from the matched 100k-step checkpoint.
-\begin{center}\footnotesize\setlength{\tabcolsep}{4.5pt}
+Two further diagnostics are needed. Because disagreement in LIDC concentrates on
+lesion boundaries, a map that merely marks a boundary already correlates with
+$\Dgt$, so $\hat D$ is compared against a trivial control: the 5-pixel boundary
+band (dilation minus erosion) of the model's own predicted mask, extending
+roughly two pixels inside and two outside its edge. It uses no grader information and is therefore
+available at inference, unlike a band drawn around the ground truth. Finally, the subtracted $\mathrm{E}[d(S,S')]$ term of
+$D^2_{\mathrm{GED}}$ is reported on its own, since it detects samples that have
+collapsed onto a single mask, alongside \emph{nestedness}: the fraction of images
+for which, sorting that image's samples by area, each is wholly contained in the
+next. Nestedness catches a subtler failure in which the model only inflates and
+shrinks one shape without ever proposing a different one, so that its samples can
+appear diverse while carrying a single degree of freedom.
+
+\paragraph{Main results.} Table~\ref{tab:main} reports the held-out test split
+(1980 images, 16 samples per image), with every arm read from its matched
+100k-step checkpoint.
+
+\begin{table}[h]
+\centering\footnotesize\setlength{\tabcolsep}{4.5pt}
 \begin{tabular}{lcccccccc}
 \toprule
 Arm & Dice $\uparrow$ & IoU $\uparrow$ & GED $\downarrow$ &
@@ -338,140 +301,138 @@ D -- coverage        & \emph{0.438} & \emph{0.369} & 0.714 & 0.120 & 0.565 & 0.5
 D -- kernel          & \emph{0.405} & \emph{0.337} & 0.933 & 0.103 & 0.569 & 0.426 & 0.000 & 100\% \\
 \bottomrule
 \end{tabular}
-\end{center}
-\emph{control} is the trivial ``boundary band of your own prediction'' baseline
-for the same model, so $\mathrm{corr}(\hat D,\Dgt)$ should be read against the number
-beside it. Dice for arm D is italicised because it is not comparable --- see below.
+\caption{Test-set results. \emph{control} is the boundary-band predictor for the
+same model, so $\mathrm{corr}(\hat D,\Dgt)$ should be read against the value
+beside it. Dice for arm D is italicised because it is not comparable; see the
+discussion below.}
+\label{tab:main}
+\end{table}
 
-\paragraph{Q1 --- can the model predict where annotators will disagree? Yes.}
-\begin{itemize}
-  \item The head reaches $\mathrm{corr}(\hat D,\Dgt)=0.627$ against its own
-        boundary-band control of $0.425$: \textbf{$+0.20$}. It has learned
-        something about rater behaviour, not merely where lesion edges are. This is the
-        project's clearest positive result and it holds in every arm with a head.
-\end{itemize}
+\textbf{Q1 is confirmed.} The head reaches $\mathrm{corr}(\hat D,\Dgt)=0.627$
+against its own boundary-band control of $0.425$, a margin of $+0.20$. It has
+therefore learned something about annotator behaviour rather than simply tracing
+the outline of its own prediction, and the result holds in every arm carrying a
+head. This is the clearest positive finding of the project.
 
-\paragraph{Q2 --- does the alignment loss move uncertainty to the right place? Weakly yes.}
-\begin{itemize}
-  \item $\mathrm{corr}(U,\Dgt)$ rises $0.483\rightarrow0.509$ from A to C, and C
-        simultaneously attains the \emph{best} GED of the three ELBO arms
-        (0.388), for a 4\% relative Dice cost.
-  \item The gain is modest, and we read that as \emph{structural} rather than a
-        tuning failure: $L_{\text{align}}$ constrains a marginal of a joint object,
-        so two sample distributions with identical marginals are invisible to it.
-        It can relocate variance; it cannot reshape modes.
-  \item It only became visible at all after the \texttt{fcomb} fix of Section~3:
-        with 100\% nested samples $U$ is a single ring around one mask, and no loss
-        can reshape it.
-\end{itemize}
+\textbf{Q2 is supported but modest.} The correlation $\mathrm{corr}(U,\Dgt)$
+rises from $0.483$ to $0.509$ between arms A and C, and arm C simultaneously
+attains the best energy distance of the three ELBO arms ($0.388$) at a relative
+Dice cost of 4\%. We read the small size of the gain as structural rather than as
+a tuning failure. $L_{\text{align}}$ constrains a marginal of a joint object, so
+two sample distributions with identical marginals are indistinguishable to it: it
+can relocate variance but cannot reshape modes. The effect only became
+measurable at all once the latent was able to vary spatially. Our \texttt{fcomb}
+initially lacked a nonlinearity between its $1\times1$ convolutions and therefore
+collapsed to a single affine map; because the injected $z$ is spatially constant,
+every sample became a level set of one function and 100\% of test images had
+strictly nested samples, leaving $U$ as a single ring that no loss could reshape.
+With the activation applied, nestedness falls to the 1--3\% of
+Table~\ref{tab:main}.
 
-\paragraph{Q3 --- and arm D: direct distribution matching wins Dice and loses everything else.}
-\begin{itemize}
-  \item Arm D posts the best Dice by a wide margin (0.438 vs.\ 0.355) and the
-        worst GED by a wide margin (0.714 / 0.933 vs.\ 0.388).
-  \item \textbf{The mechanism is in one column:} $\mathrm{E}[d(S,S')]$ is
-        \textbf{0.024} (coverage) and \textbf{0.0004} (kernel), against 0.69 for
-        arms A--C, with \textbf{99--100\% of test images nested}. All 16 samples
-        are effectively the same mask --- the model has become deterministic, and
-        the subtracted diversity term of $D^2_{\mathrm{GED}}$ vanishes, which is
-        exactly why GED nearly doubles while Dice improves.
-  \item \textbf{Why.} The two-way soft-Dice objective plus the consensus term is
-        minimised by placing \emph{every} sample on the single mask closest to all
-        four annotations. Nothing in it rewards spread. In the original ELBO the
-        KL term keeps the prior wide; deleting the CVAE machinery deleted the only
-        pressure holding the samples apart.
-  \item The Dice win is therefore circular: arm D is trained on a soft-Dice
-        criterion and then evaluated by Dice on what is now a single consensus
-        mask. It is a better \emph{point} estimate and a far worse model of
-        ambiguity, which is the thing the paper set out to capture.
-  \item \textbf{Arm D is the mirror image of our extension.} It tries to obtain the
-        joint \emph{from the loss} --- matching whole masks set-to-set --- after
-        deleting the machinery that maintained it, and ends up with no joint at
-        all. We keep the CVAE's joint and constrain only its marginal.
-  \item \textbf{A metric lesson worth stating.} Arm D also achieves the
-        \emph{lowest} disagreement MAE (0.0125 vs.\ 0.0176 for C), because $\Dgt$
-        is near zero almost everywhere and predicting ``no uncertainty anywhere''
-        scores well on a mean absolute error. Correlation exposes this
-        immediately; MAE does not. We report both and rely on correlation.
-\end{itemize}
+\textbf{Arm D wins on Dice and loses on everything else.} Direct distribution
+matching produces the best Dice by a wide margin ($0.438$ against $0.355$) and
+the worst energy distance by a wide margin ($0.714$ and $0.933$ against $0.388$).
+The mechanism is visible in a single column: $\mathrm{E}[d(S,S')]$ is $0.024$ for
+the coverage form and $0.0004$ for the kernel form, against $0.69$ for arms
+A--C, with 99--100\% of test images nested. All sixteen samples are effectively
+the same mask, so the model has become deterministic and the subtracted diversity
+term of $D^2_{\mathrm{GED}}$ vanishes, which is exactly why the energy distance
+nearly doubles even as Dice improves. The cause is that a two-way soft-Dice
+objective combined with a consensus term is minimised by placing every sample on
+the single mask closest to all four annotations; nothing in it rewards spread. In
+the original ELBO the KL term is what keeps the prior broad, and removing the
+conditional VAE removed the only pressure holding the samples apart. The Dice
+advantage is therefore circular: arm D is trained on a soft-Dice criterion and
+then evaluated by Dice on what has become a point estimate. It is a better point
+estimate and a considerably worse model of ambiguity. Arm D is in this sense the
+mirror image of our own extension: it attempts to obtain the joint distribution
+from the loss, having deleted the machinery that maintained it, whereas we retain
+that machinery and constrain only its marginal.
+
+Arm D also illustrates why correlation rather than error magnitude is the right
+primary metric. It attains the \emph{lowest} disagreement MAE of any arm
+($0.0125$ against $0.0176$ for arm C), because $\Dgt$ is near zero almost
+everywhere and a model predicting no uncertainty anywhere scores well on a mean
+absolute error. Correlation exposes this immediately; MAE does not.
 
 \begin{figure}[!ht]
 \centering
-\includegraphics[width=0.88\textwidth]{figs/qualitative}
+\includegraphics[width=0.86\textwidth]{figs/qualitative}
 \vspace{-0.6em}
-\caption{\textbf{A case where the graders disagree about whether a lesion exists
-at all} (test index 413, LIDC-IDRI-0267). Row 1: the CT crop, the four expert
-masks --- note that \textbf{M2 is empty} --- and $\Dgt$, which covers the whole
-nodule rather than a rim, because the disagreement is about existence. Rows 2--3:
-four samples and the resulting $U$ for the baseline and for our full model; both
-reproduce the ambiguity by emitting a mix of empty and non-empty samples. Row 4:
-the predicted $\hat D$ and the two error maps. $|\hat D-\Dgt|$ is dark over the
-lesion while $|U-\Dgt|$ is bright, which is the limitation discussed in
-Section~5: the head recovers existence-disagreement, but $U$ would have to be
-maximal over the entire nodule to match $\Dgt$, and that fights the segmentation
-loss.}
+\caption{A case in which the graders disagree about whether a lesion exists at
+all (test index 413, LIDC-IDRI-0267). Row 1: the CT crop, the four expert masks
+--- note that M2 is empty --- and $\Dgt$, which covers the whole nodule rather
+than a rim, because the disagreement concerns existence. Rows 2--3: four samples
+and the resulting $U$ for the baseline and for our full model, both reproducing
+the ambiguity by emitting a mixture of empty and non-empty samples. Row 4: the
+predicted $\hat D$ and the two error maps. $|\hat D-\Dgt|$ is dark over the
+lesion while $|U-\Dgt|$ is bright, which illustrates the limitation discussed
+below: the head recovers existence-disagreement, but $U$ would have to be maximal
+across the entire nodule to match $\Dgt$, and that competes directly with the
+segmentation loss.}
 \label{fig:qual}
 \end{figure}
 
-\paragraph{Failure cases and challenges encountered.}
-\begin{itemize}
-  \item \textbf{Posterior collapse (first full run, discarded).} Our
-        reconstruction term averaged cross-entropy over pixels while Kohl et al.
-        sum it; at $128\times128$ that under-weights reconstruction $\sim$16000$\times$
-        against $\beta\,\mathrm{KL}$, so $\beta=1$ behaved like $\beta\approx16000$.
-        The KL hit exactly 0 by 30k steps, sample diversity fell from 0.45 to
-        0.006, and val GED \emph{rose} 0.34$\rightarrow$0.61 while Dice improved.
-        Fixed by summing the cross-entropy.
-  \item \textbf{Divergence and a runaway prior.} With the corrected (summed) loss
-        every arm produced NaNs in the prior encoder within 2k steps, fixed with
-        gradient clipping and a $\pm10$ clamp on the latent log-variance. And at
-        $\lambda_A=10^{-4}$ the KL doubled every step until overflow, because
-        $L_{\text{align}}$ back-propagates into the prior and inflating the prior
-        variance is the cheapest way to raise diversity; fixed by detaching the
-        prior in the sampling path and using $\lambda_A=10^{-5}$.
-  \item \textbf{Model selection.} Selecting the checkpoint on best validation GED
-        picks step 1000--3000 for arms A and B --- a barely-trained model with a
-        wide, uninformative prior scores well on GED. We therefore report the
-        matched 100k-step checkpoint for every arm, which compares methods rather
-        than training length.
-  \item \textbf{The conceptual limit (Figure~\ref{fig:qual}).} On LIDC much of
-        the disagreement is about lesion existence, so matching $U$ to $\Dgt$
-        demands maximal uncertainty over \emph{whole} lesions, which directly
-        opposes the reconstruction term. This bounds how far $L_{\text{align}}$
-        can go, and points at the fix in Section~6.
-\end{itemize}
+\paragraph{Failure cases and challenges.} Our first full-length run suffered
+posterior collapse and was discarded. The reconstruction term averaged
+cross-entropy over pixels where Kohl et al.\ sum it; at $128\times128$ this
+under-weights reconstruction by a factor of about 16000 relative to
+$\beta\,\mathrm{KL}$, so $\beta=1$ behaved like $\beta\approx16000$. The KL term
+reached zero by step 31k and the validation energy distance \emph{rose} from
+$0.34$ to $0.61$ while Dice continued to improve --- the signature of a network
+that had become deterministic. Summing the cross-entropy fixed it. With the corrected loss,
+gradients are far larger and every arm produced NaNs in the prior encoder within
+2k steps, which is why the clipping and clamp of Section~\ref{sec:method} are
+required. A related instability appears at $\lambda_A=10^{-4}$, where the KL
+doubles at every step until it overflows: $L_{\text{align}}$ back-propagates into
+the prior, and inflating the prior variance is the cheapest available way to
+raise sample diversity. Detaching the prior in the sampling path removes this
+route.
+
+Checkpoint selection also proved misleading. Selecting on best validation energy
+distance chooses step 1000 for arm A and step 3000 for arm B, because a
+barely-trained model with a wide, uninformative prior scores well on that metric;
+we therefore report the matched 100k-step checkpoint for every arm, which
+compares methods rather than training durations. Finally, Figure~\ref{fig:qual}
+shows a conceptual limit. Much of the disagreement in LIDC concerns lesion
+existence, so matching $U$ to $\Dgt$ demands maximal uncertainty across whole
+lesions, in direct opposition to the reconstruction term. This bounds how far
+$L_{\text{align}}$ can usefully go and motivates the refinement proposed below.
 
 % ===============================================================
-\section{Conclusion}
-\begin{itemize}
-  \item \textbf{Q1 is confirmed:} where radiologists will disagree is predictable
-        from the image alone --- $0.627$ correlation against a $0.425$ trivial
-        control, from a single $1{\times}1$ convolution. \textbf{Q2 is supported
-        but modest:} the alignment loss raises $\mathrm{corr}(U,\Dgt)$ by $0.026$
-        and gives the best GED of our ELBO arms, at a 4\% Dice cost.
-  \item \textbf{The claim we make} is not ``our Dice is higher''. The baseline
-        already generates diverse plausible segmentations; our extension makes
-        that diversity correspond to where experts actually disagree, and makes
-        the disagreement itself an explicit, inspectable output.
-  \item \textbf{One sentence for the whole design:} joint structure from the CVAE,
-        marginal localisation from our loss. Arm D shows what happens when you try
-        to get the joint from the loss instead --- the best point estimate and no
-        distribution at all ($\mathrm{E}[d(S,S')]\approx0$, 99--100\% nested).
-  \item \textbf{The sharpest limitation is the marginal itself.} $\Dgt$ is a
-        per-pixel quantity: two graders drawing mask A and two drawing mask B
-        produce exactly the same $\Dgt$ as four graders disagreeing incoherently.
-        Neither $\Dgt$ nor $U$ can tell coherent modes from pixel noise, which
-        bounds both the supervision and the evaluation.
-  \item \textbf{Other limitations:} 100k of the paper's 240k iterations and
-        crop-only augmentation, so our absolute GED sits above published values;
-        one dataset and anatomy; $\Dgt$ estimated from only four graders; one seed
-        per arm, so arm B's Dice gap is not separable from run-to-run noise.
-  \item \textbf{Future work:} restrict $L_{\text{align}}$ to a boundary band so it
-        shapes edge placement without demanding uncertainty over whole lesions
-        --- the most likely route to a strong Q2; rescue arm D by adding an
-        explicit diversity/repulsion term or retaining the KL; and compare against
-        the Hierarchical Probabilistic U-Net and MoSE on the same split.
-\end{itemize}
+\section{Conclusion}\label{sec:conc}
+
+Where radiologists will disagree is predictable from the image alone: a single
+$1\times1$ convolution reaches a correlation of $0.627$ with the true
+disagreement map, against $0.425$ for a trivial boundary-band predictor. Aligning
+sample diversity with that disagreement produces a smaller but consistent gain,
+raising $\mathrm{corr}(U,\Dgt)$ by $0.026$ while attaining the best energy
+distance among our ELBO arms at a 4\% Dice cost. The claim we make is not that
+our Dice is higher. The baseline already generates diverse plausible
+segmentations; our extension makes that diversity correspond to where experts
+actually disagree, and turns the disagreement itself into an explicit,
+inspectable output. Summarised in one sentence, the design takes its joint
+structure from the conditional VAE and its marginal localisation from our loss,
+and arm D demonstrates what happens when the joint is instead demanded of the
+loss: the best point estimate in the study and no distribution at all.
+
+The sharpest limitation is the marginal itself. $\Dgt$ is a per-pixel quantity,
+so two graders drawing mask A and two drawing mask B yield exactly the same map
+as four graders disagreeing incoherently; neither $\Dgt$ nor $U$ can distinguish
+coherent modes from pixel noise, which bounds both the supervision and the
+evaluation. Beyond that, we train for 100k of the paper's 240k iterations with
+crop-only augmentation, so our absolute energy distances sit above published
+values; we study one dataset and one anatomy; $\Dgt$ is estimated from only four
+graders; and each arm was run with a single seed, so the Dice gap of arm B cannot
+be separated from run-to-run variation.
+
+Three directions follow. Restricting $L_{\text{align}}$ to a boundary band would
+let it shape edge placement without demanding uncertainty across whole lesions,
+and is in our view the most likely route to a decisive Q2 result. Arm D might be
+rescued by adding an explicit diversity or repulsion term, or by retaining the KL
+alongside the matching loss, so that the objective has some pressure keeping
+samples apart. Finally, comparing against the Hierarchical Probabilistic U-Net
+and against MoSE on the same split would place these numbers in context.
 
 % ===============================================================
 {\footnotesize
@@ -485,8 +446,6 @@ preprocessed LIDC crops.)
 (LIDC) and Image Database Resource Initiative (IDRI)}, Medical Physics, 2011.
 \bibitem{ronneberger2015} O.~Ronneberger, P.~Fischer, T.~Brox, \emph{U-Net:
 Convolutional Networks for Biomedical Image Segmentation}, MICCAI 2015.
-\bibitem{ji2021} W.~Ji et al., \emph{Learning Calibrated Medical Image
-Segmentation via Multi-rater Agreement Modeling}, CVPR 2021.
 \bibitem{zhang2020} L.~Zhang et al., \emph{Disentangling Human Error from the
 Ground Truth in Segmentation of Medical Images}, NeurIPS 2020.
 \bibitem{gao2023} Z.~Gao et al., \emph{Modeling Multimodal Aleatoric Uncertainty
