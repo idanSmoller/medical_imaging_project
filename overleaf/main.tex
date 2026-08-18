@@ -2,8 +2,8 @@
 % Medical Images Processing with Deep Learning (336033) - Project report
 % Prose version. Max 6 pages; sections follow the course Report Guidelines.
 % Every number is a measurement from outputs_fcombfix/final_eval_100k/,
-% outputs_distribution/final_eval_100k/, outputs_12_08_26_10000/ and
-% outputs_11_08_26/. See RESULTS.md for the full experimental record.
+% outputs_12_08_26_10000/ and outputs_11_08_26/. See RESULTS.md for the
+% full experimental record.
 % ---------------------------------------------------------------
 \documentclass[10pt]{article}
 
@@ -158,19 +158,13 @@ outperforms a trivial predictor that merely marks lesion boundaries.
 $\Dgt$ relative to the baseline without degrading segmentation quality or the
 energy distance.
 
-We considered three alternatives. Conditioning the prior on disagreement,
+We considered two alternatives. Conditioning the prior on disagreement,
 $p(z\mid x,\hat D)$, was rejected because $\hat D$ is a deterministic function of
 $x$ and therefore contributes no new information while confounding the ablation.
 Per-rater output heads or annotator confusion matrices~\cite{zhang2020} were
 rejected because the LIDC release does not identify which radiologist produced
 which mask and the four raters differ from scan to scan, leaving a per-rater
-parameterisation nothing stable to learn. The third alternative, replacing the
-ELBO with direct distribution matching, treats the four masks as an empirical
-distribution and trains the $K$ samples to match it through a two-way soft-Dice
-loss. This is close in spirit to MoSE~\cite{gao2023}, which matches a
-segmentation distribution to an annotation set with a Wasserstein-like loss on
-the same dataset. Rather than dismiss it on paper, we implemented it and ran it
-as a fourth arm; Section~\ref{sec:results} reports the outcome.
+parameterisation nothing stable to learn.
 
 % ===============================================================
 \section{Methodology}\label{sec:method}
@@ -205,7 +199,7 @@ None of these were tuned, and every arm runs them identically, which is what
 allows the results table to be read as an ablation: a difference between arms
 cannot be an artefact of optimiser search, because no such search was performed.
 
-Four choices were ours. We train for 100k steps rather than the paper's 240k, a
+Three choices were ours. We train for 100k steps rather than the paper's 240k, a
 computational constraint; absolute energy distances consequently sit above
 published values, and only the relative ordering of arms trained to an identical
 budget is meaningful. We set $\lambda_D=0.01$ and $\lambda_A=10^{-5}$ after
@@ -220,7 +214,7 @@ Augmentation is limited to the random translated crop; the paper additionally
 applies elastic deformation, rotation, shearing and scaling. Training draws
 $K=4$ samples per step, and evaluation uses 16 samples per image.
 
-\paragraph{Ablation design.} Four arms vary one component at a time.
+\paragraph{Ablation design.} Three arms vary one component at a time.
 
 \begin{center}\small
 \begin{tabular}{llll}
@@ -230,20 +224,10 @@ Arm & Disagreement head & Alignment loss & Objective \\
 A -- baseline PU-Net & no  & no  & $L_{\text{PU-Net}}$ \\
 B -- $+$ head        & yes & no  & $+\lambda_D L_D$ \\
 C -- full model      & yes & yes & $+\lambda_D L_D+\lambda_A L_{\text{align}}$ \\[2pt]
-D -- distribution matching & yes & no &
-  $\lambda_{\text{dist}}L_{\text{dist}}+\lambda_{\text{con}}L_{\text{con}}+\lambda_D L_D$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-Arm D discards the ELBO entirely: there is no random-grader cross-entropy, no
-posterior and no KL term. Instead $K$ samples are drawn from the prior with
-gradients, and a $K\times G$ matrix of soft-Dice distances to the four masks is
-reduced in one of two ways. The \emph{coverage} form requires every human mask to
-be matched by some sample and every sample to resemble some human mask, through a
-soft minimum; the \emph{kernel} form uses a two-way soft kernel likelihood.
-$L_{\text{con}}$ is a soft Dice between the mean sample and the mean human mask.
-Both modes are reported.
 
 \paragraph{Tools.} Python, PyTorch, NumPy and Matplotlib. The submitted code runs
 in Google Colab as a self-contained notebook that executes the whole pipeline
@@ -296,15 +280,11 @@ Arm & Dice $\uparrow$ & IoU $\uparrow$ & GED $\downarrow$ &
 A -- baseline        & \textbf{0.355} & \textbf{0.280} & 0.394 & 0.483 & --- & 0.417 & 0.686 & 1\% \\
 B -- $+$ head        & 0.308 & 0.241 & 0.403 & 0.492 & 0.609 & 0.451 & 0.687 & 3\% \\
 C -- full            & 0.340 & 0.267 & \textbf{0.388} & \textbf{0.509} & \textbf{0.627} & 0.425 & 0.692 & 1\% \\
-\midrule
-D -- coverage        & \emph{0.438} & \emph{0.369} & 0.714 & 0.120 & 0.565 & 0.507 & 0.024 & 99.5\% \\
-D -- kernel          & \emph{0.405} & \emph{0.337} & 0.933 & 0.103 & 0.569 & 0.426 & 0.000 & 100\% \\
 \bottomrule
 \end{tabular}
 \caption{Test-set results. \emph{control} is the boundary-band predictor for the
 same model, so $\mathrm{corr}(\hat D,\Dgt)$ should be read against the value
-beside it. Dice for arm D is italicised because it is not comparable; see the
-discussion below.}
+beside it.}
 \label{tab:main}
 \end{table}
 
@@ -329,31 +309,6 @@ strictly nested samples, leaving $U$ as a single ring that no loss could reshape
 With the activation applied, nestedness falls to the 1--3\% of
 Table~\ref{tab:main}.
 
-\textbf{Arm D wins on Dice and loses on everything else.} Direct distribution
-matching produces the best Dice by a wide margin ($0.438$ against $0.355$) and
-the worst energy distance by a wide margin ($0.714$ and $0.933$ against $0.388$).
-The mechanism is visible in a single column: $\mathrm{E}[d(S,S')]$ is $0.024$ for
-the coverage form and $0.0004$ for the kernel form, against $0.69$ for arms
-A--C, with 99--100\% of test images nested. All sixteen samples are effectively
-the same mask, so the model has become deterministic and the subtracted diversity
-term of $D^2_{\mathrm{GED}}$ vanishes, which is exactly why the energy distance
-nearly doubles even as Dice improves. The cause is that a two-way soft-Dice
-objective combined with a consensus term is minimised by placing every sample on
-the single mask closest to all four annotations; nothing in it rewards spread. In
-the original ELBO the KL term is what keeps the prior broad, and removing the
-conditional VAE removed the only pressure holding the samples apart. The Dice
-advantage is therefore circular: arm D is trained on a soft-Dice criterion and
-then evaluated by Dice on what has become a point estimate. It is a better point
-estimate and a considerably worse model of ambiguity. Arm D is in this sense the
-mirror image of our own extension: it attempts to obtain the joint distribution
-from the loss, having deleted the machinery that maintained it, whereas we retain
-that machinery and constrain only its marginal.
-
-Arm D also illustrates why correlation rather than error magnitude is the right
-primary metric. It attains the \emph{lowest} disagreement MAE of any arm
-($0.0125$ against $0.0176$ for arm C), because $\Dgt$ is near zero almost
-everywhere and a model predicting no uncertainty anywhere scores well on a mean
-absolute error. Correlation exposes this immediately; MAE does not.
 
 \begin{figure}[!ht]
 \centering
@@ -412,9 +367,7 @@ our Dice is higher. The baseline already generates diverse plausible
 segmentations; our extension makes that diversity correspond to where experts
 actually disagree, and turns the disagreement itself into an explicit,
 inspectable output. Summarised in one sentence, the design takes its joint
-structure from the conditional VAE and its marginal localisation from our loss,
-and arm D demonstrates what happens when the joint is instead demanded of the
-loss: the best point estimate in the study and no distribution at all.
+structure from the conditional VAE and its marginal localisation from our loss.
 
 The sharpest limitation is the marginal itself. $\Dgt$ is a per-pixel quantity,
 so two graders drawing mask A and two drawing mask B yield exactly the same map
@@ -426,13 +379,11 @@ values; we study one dataset and one anatomy; $\Dgt$ is estimated from only four
 graders; and each arm was run with a single seed, so the Dice gap of arm B cannot
 be separated from run-to-run variation.
 
-Three directions follow. Restricting $L_{\text{align}}$ to a boundary band would
+Two directions follow. Restricting $L_{	ext{align}}$ to a boundary band would
 let it shape edge placement without demanding uncertainty across whole lesions,
-and is in our view the most likely route to a decisive Q2 result. Arm D might be
-rescued by adding an explicit diversity or repulsion term, or by retaining the KL
-alongside the matching loss, so that the objective has some pressure keeping
-samples apart. Finally, comparing against the Hierarchical Probabilistic U-Net
-and against MoSE on the same split would place these numbers in context.
+and is in our view the most likely route to a decisive Q2 result. Comparing
+against the Hierarchical Probabilistic U-Net on the same split would place these
+numbers in context.
 
 % ===============================================================
 {\footnotesize
@@ -448,8 +399,5 @@ preprocessed LIDC crops.)
 Convolutional Networks for Biomedical Image Segmentation}, MICCAI 2015.
 \bibitem{zhang2020} L.~Zhang et al., \emph{Disentangling Human Error from the
 Ground Truth in Segmentation of Medical Images}, NeurIPS 2020.
-\bibitem{gao2023} Z.~Gao et al., \emph{Modeling Multimodal Aleatoric Uncertainty
-in Segmentation with Mixture of Stochastic Experts}, ICLR 2023. arXiv:2212.07328.
-\end{thebibliography}}
 
 \end{document}
