@@ -1,0 +1,40 @@
+% Running review list for main.tex. Status as of 2026-08-18.
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\newcommand{\done}[1]{\textcolor{green!50!black}{\textbf{[DONE]}} #1}
+\newcommand{\open}[1]{\textcolor{red}{\textbf{[OPEN]}} #1}
+\begin{document}
+\section*{Review list for the report}
+
+\subsection*{Resolved}
+\begin{itemize}
+  \item \done{``Keep the honesty note in the data section?'' --- kept, but
+        rewritten as a normal sentence of the report rather than a note to
+        ourselves: the split counts are $\sim$0.4\% below the paper's because the
+        authors cleaned the data post-publication, so we cite the HPU-Net release
+        and do not claim a byte-identical reproduction.}
+  \item \done{``Change the third alternative to something that makes sense.'' ---
+        replaced. The three alternatives are now (i) conditioning the prior on
+        $\hat D$, (ii) a dedicated multi-rater architecture (MRNet, CVPR 2021),
+        (iii) per-rater confusion matrices (NeurIPS 2020), and (iv) replacing the
+        ELBO with direct distribution matching (close to MoSE, ICLR 2023) --- which
+        we did not merely reject, we implemented and ran it as arm D.}
+  \item \done{``Add an image of the architecture.'' --- \texttt{figure\_model.tex},
+        real CT/mask/$D^{GT}$ thumbnails from LIDC-IDRI-0217.}
+  \item \done{``The data section mentions the empty-mask convention but the term
+        never appears under evaluation.'' --- it is now defined in bold in the
+        metrics list: $d\equiv0$ for two empty masks in GED, and empty-vs-empty
+        pairs excluded rather than scored 0 in Dice/IoU.}
+\end{itemize}
+
+\subsection*{Open before submission}
+\begin{itemize}
+  \item \open{Both student ID numbers on the title page.}
+  \item \open{The Colab notebook predates the distribution-matching variant, so it
+        does not contain arm D. Either port arm D into the notebook or narrow what
+        the Methodology paragraph claims the notebook covers.}
+  \item \open{Optional: swap the schematic $U$/$\hat D$/prediction thumbnails in
+        the architecture figure for real maps, now that trained checkpoints exist.}
+\end{itemize}
+\end{document}

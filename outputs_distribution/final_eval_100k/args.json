@@ -1,0 +1,18 @@
+{
+  "batch_size": 8,
+  "checkpoint_name": "latest_checkpoint.pt",
+  "crop_size": 128,
+  "data_root": "data/lidc",
+  "device": "cuda",
+  "eval_samples": 16,
+  "max_test": null,
+  "num_workers": 0,
+  "out_dir": "outputs_distribution/final_eval_100k",
+  "runs_dir": "outputs_distribution/lidc_ablation",
+  "seed": 1,
+  "split": "test",
+  "variants": [
+    "coverage",
+    "kernel"
+  ]
+}

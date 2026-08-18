@@ -128,7 +128,7 @@ def evaluate_checkpoint(model, variant, loader, args):
             control = boundary_band(deterministic).cpu().numpy()
 
             predicted = None
-            if variant in ("head", "full"):
+            if variant in ("head", "full", "distribution"):
                 predicted = model.predict_disagreement().cpu().numpy()
 
             grader_masks = masks.cpu().numpy().astype(bool)
@@ -218,7 +218,7 @@ def main():
             continue
         model, checkpoint, saved_variant = load_checkpoint_model(path, args.device)
         metrics = evaluate_checkpoint(model, saved_variant, loader, args)
-        metrics["variant"] = saved_variant
+        metrics["variant"] = variant if saved_variant == "distribution" else saved_variant
         metrics["step"] = int(checkpoint.get("step", -1))
         metrics["lambda_disagreement"] = checkpoint["args"].get("lambda_disagreement")
         metrics["lambda_alignment"] = checkpoint["args"].get("lambda_alignment")

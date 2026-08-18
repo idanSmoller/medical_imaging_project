@@ -1,4 +1,4 @@
-# Results, as of 2026-08-16
+# Results, as of 2026-08-18
 
 Where the project actually stands, what the numbers are, and what is still open.
 Read `AGENTS.md` first for repo conventions; this file is the experimental record.
@@ -8,13 +8,14 @@ Everything here is reproducible from what is in git **except the model weights**
 
 ---
 
-## 1. The three arms
+## 1. The four arms
 
 | arm | directory | steps | fcomb | status |
 | --- | --- | --- | --- | --- |
 | collapsed | `outputs_11_08_26/` | 240k | affine | **do not report** — posterior collapse |
 | affine | `outputs_12_08_26_240000/` | 240k | affine | complete; best absolute GED, but the fcomb bug makes all samples nested |
 | fcomb-fixed | `outputs_fcombfix/` | 100k | fixed | complete; **best Q1/Q2 results, see §4** |
+| distribution | `outputs_distribution/` | 100k | fixed | complete; **diversity collapse, see §4b** |
 
 There is also `outputs_12_08_26_10000/` — 10k probe runs used to pick λ_D and λ_A.
 Useful as evidence for the λ choices, not as results.
@@ -131,6 +132,50 @@ not evidence about the fcomb.
 schedule — cheaper than rerunning the fixed arm at 240k, and still the single most
 valuable next experiment.
 
+## 4b. The distribution-matching arm (100k steps) — complete, negative
+
+`outputs_distribution/`, branch `multi-rater-distribution-matching`.
+`--variant distribution` drops the ELBO entirely (no random-grader CE, no
+posterior, no KL) and trains K=4 gradient-carrying prior samples against the four
+masks with a two-way soft-Dice loss, plus a consensus term and the same L_D.
+Two aggregations, both run: `--distribution-mode coverage` (plan §8.2) and
+`kernel` (§8.3), λ_dist 1.0 / λ_con 0.2 / λ_D 0.01 / τ 0.1.
+
+Test set, matched 100k `latest_checkpoint.pt`, in
+`outputs_distribution/final_eval_100k/`:
+
+| variant | dice | IoU | GED | U–D corr | pred D corr | control | E[d(S,S')] | nested |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| coverage | **0.4383** | **0.3688** | 0.7135 | 0.1201 | 0.5645 | 0.5065 | 0.0239 | 99.5% |
+| kernel | 0.4051 | 0.3367 | 0.9329 | 0.1033 | 0.5689 | 0.4260 | 0.0004 | 100% |
+
+**Best dice of any arm, worst GED of any arm, and the reason is one column.**
+`E[d(S,S')]` is 0.024 / 0.0004 against 0.69 for the fcomb-fixed arm, with
+99–100% of images nested: all 16 samples are the same mask. The model is
+deterministic.
+
+Why: the two-way soft-Dice objective plus the consensus term is minimised by
+putting *every* sample on the single mask closest to all four annotations —
+nothing in it rewards spread. In the ELBO the KL term is what keeps the prior
+wide; deleting the CVAE deleted the only pressure holding samples apart. The
+dice win is circular (trained on soft Dice, evaluated by Dice, on what is now a
+point estimate).
+
+Two things worth carrying forward:
+
+- **Do not use disagreement MAE as a primary metric.** This arm has the *lowest*
+  `unc_mae` (0.0125 vs 0.0176 for `full`) with essentially no correlation, because
+  D_GT is ~0 almost everywhere and "no uncertainty anywhere" scores well on MAE.
+- The idea itself is close to **MoSE (Gao et al., ICLR 2023)**, which matches a
+  segmentation distribution to the annotation set with a Wasserstein-like loss on
+  LIDC — but MoSE keeps an explicit mixture with a gating network, i.e. structural
+  diversity the loss cannot collapse. Reviving this arm needs an explicit
+  diversity/repulsion term or the KL retained, not a different τ.
+
+`scripts/eval_lidc_final.py` needed two changes to evaluate it: the head gate now
+includes `"distribution"`, and rows are labelled by run directory so `coverage`
+and `kernel` do not both print as `distribution`.
+
 ## 5. Numerical stability — three things that will bite you
 
 All three only appeared once the fcomb nonlinearity was enabled. All are fixed in
@@ -175,6 +220,9 @@ put the auxiliary terms at 0.6×–6× the reconstruction. The working range is
 
 ## 6. What we would do next, in priority order
 
+0. **Report the fcomb-fixed arm (§4) as the headline result** — that decision
+   is made; see `overleaf/main.tex`. §4b is reported alongside it as a negative
+   result, not buried.
 1. **Rerun the affine arm at 100k** to de-confound §4. Three runs, ~3.7h each.
    This is the one experiment that would let you say whether the fcomb fix helps
    or hurts absolute GED.

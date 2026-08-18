@@ -1,0 +1,470 @@
+% ---------------------------------------------------------------
+% Medical Images Processing with Deep Learning (336033) - Project report
+% Max 6 pages. Sections below follow the course "Report Guidelines" exactly.
+%
+% This is a SKELETON: every section holds bullet points of what to say.
+% Turn each bullet into prose as the results come in. Anything wrapped in
+% \todo{...} is missing and shows up in red -- see the macro below.
+% ---------------------------------------------------------------
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+% ---------------------------------------------------------------
+% >>> RESULTS UPDATE (2026-08-16) <<<
+% Everything written from the finished experiments is wrapped in \new{...} and
+% renders BLUE in the PDF. Each edited block is also flagged in the source with
+% a "% >>> UPDATED" comment, so you can find the changes either way.
+% To drop the colour once you have read it all: \renewcommand{\new}[1]{#1}
+%
+% Blocks changed, in order:
+%   1. Proposed extension -> rejected alternatives (replaced the third one)
+%   2. Methodology -> Training (real schedule; the Colab placeholder was wrong)
+%   3. Methodology -> Ablation design (lambda values actually used)
+%   4. Results and analysis (entirely rewritten: table + fcomb finding + discussion)
+%   5. Conclusion (entirely rewritten)
+%   6. Introduction -> ELBO written as an equation
+%   7. Proposed extension -> U written as an equation, parallel to D^GT
+%      (also: GED written as an equation in Results/Metrics)
+% ---------------------------------------------------------------
+\newcommand{\new}[1]{\textcolor{blue}{#1}}
+
+\title{Disagreement-Aware Probabilistic U-Net:\\
+Aligning Predictive Diversity with Inter-Rater Disagreement}
+\author{Amit Heshes (\todo{ID}) \and Idan Smoller (\todo{ID})}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+% ===============================================================
+\section*{Title page details}
+\begin{itemize}
+  \item \textbf{Selected paper:} Kohl et al., \emph{A Probabilistic U-Net for
+        Segmentation of Ambiguous Images}, NeurIPS 2018.
+  \item \textbf{Proposed extension:} add explicit supervision of \emph{where
+        human annotators disagree}, and force the model's sample diversity to
+        appear in those same places.
+\end{itemize}
+
+% ===============================================================
+\section{Introduction}
+
+\paragraph{What the paper does.}
+\begin{itemize}
+  \item Medical images are ambiguous: several experts segment the same lesion
+        differently. A standard U-Net outputs one mask and hides that ambiguity.
+  \item The Probabilistic U-Net combines a U-Net with a conditional VAE. A
+        low-dimensional latent $z$ is drawn from a prior $p(z\mid x)$; each draw
+        decodes to a different plausible segmentation.
+% >>> UPDATED (6/7): ELBO written out; it was only described in words
+  \item Training maximises an ELBO in which a posterior $q(z\mid x,y)$ sees one
+        randomly chosen expert mask $y$: \new{
+        \[
+          L_{\text{PU-Net}}
+          = \underbrace{\mathrm{E}_{z\sim q(z\mid x,y)}\!\left[-\log p(y\mid x,z)\right]}
+              _{\text{reconstruction (CE, summed over pixels)}}
+            + \beta\,\underbrace{D_{\mathrm{KL}}\!\left(q(z\mid x,y)\,\|\,p(z\mid x)\right)}
+              _{\text{pulls prior towards posterior}} .
+        \]
+        The balance between these two terms is not cosmetic --- Section~3
+        describes how getting the reconstruction reduction wrong collapses the
+        posterior onto the prior.}
+  \item Result: sampling $z$ many times produces a \emph{distribution} of
+        segmentations rather than one answer.
+\end{itemize}
+
+\paragraph{Why it matters.}
+\begin{itemize}
+  \item In lung-nodule screening the disputed cases are the clinically
+        interesting ones. A model that says ``experts would argue here'' is more
+        useful than one that reports a confident wrong boundary.
+  \item Calibrated uncertainty is what makes a segmentation model usable as a
+        second reader instead of a black box.
+\end{itemize}
+
+\paragraph{Why we chose it.}
+\begin{itemize}
+  \item LIDC-IDRI ships \textbf{four} independent expert masks per image, so
+        disagreement is directly measurable --- rare in segmentation datasets.
+  \item The paper's own evaluation (generalized energy distance) scores the
+        sample distribution globally, but never asks \emph{where} in the image
+        the diversity lands. That gap is exactly what we attack.
+\end{itemize}
+
+% ===============================================================
+\section{Proposed extension}
+
+\paragraph{The gap we address.}
+\begin{itemize}
+  \item The Probabilistic U-Net's diversity is supervised only \emph{indirectly}
+        --- each training step shows the posterior one randomly drawn grader.
+  \item Nothing in the objective says the variation between samples should be
+        located where the graders actually differ. A model could produce the
+        right \emph{amount} of variability in the wrong \emph{places} and still
+        score well on energy distance.
+\end{itemize}
+
+\paragraph{What we add (two pieces).}
+\begin{itemize}
+  \item \textbf{Ground-truth disagreement map.} From the $G=4$ binary masks,
+        take the per-pixel mean $P_i=\frac{1}{G}\sum_g Y_i^{(g)}$ and its
+        normalized binary entropy
+        \[
+          D_i^{GT}=-\frac{P_i\log(P_i+\epsilon)+(1-P_i)\log(1-P_i+\epsilon)}{\log 2}
+          \in[0,1].
+        \]
+        $D^{GT}=0$ where all four agree, $1$ where they split evenly.
+  \item \textbf{(B) Disagreement head.} A single $1\times1$ convolution +
+        sigmoid on the final U-Net features predicts $\hat D(x)$, trained with
+        MSE against $D^{GT}$: $L_D=\frac{1}{HW}\sum_i(\hat D_i-D_i^{GT})^2$.
+% >>> UPDATED (7/7): U written out so it visibly parallels D^GT
+  \item \textbf{(C) Alignment loss.} Draw $K$ latent samples during training and
+        average their foreground probabilities,
+        $\bar Q_i=\frac{1}{K}\sum_k Q_i^{(k)}$. \new{Model uncertainty is the
+        \emph{same} functional as $D^{GT}$, with the $K$ samples playing the role
+        of the $G$ graders:
+        \[
+          U_i=-\frac{\bar Q_i\log(\bar Q_i+\epsilon)+(1-\bar Q_i)\log(1-\bar Q_i+\epsilon)}{\log 2},
+          \qquad
+          L_{\text{align}}=\frac{1}{HW}\sum_i\left|U_i-D_i^{GT}\right| .
+        \]
+        Using one functional for both sides is what makes the comparison
+        $U\approx D^{GT}$ meaningful rather than a comparison of units.}
+  \item Full objective:
+        $L=L_{\text{PU-Net}}+\lambda_D L_D+\lambda_A L_{\text{align}}$.
+    \item Figure~\ref{fig:model} shows both additions in place; everything inside
+        the dashed box is new, everything outside it is the original model.
+\end{itemize}
+
+\input{figure_model}
+
+\paragraph{Keep three quantities distinct (do this throughout the report).}
+\begin{itemize}
+  \item $D^{GT}$ --- \emph{human} disagreement, computed from the four masks.
+  \item $\hat D$ --- \emph{predicted} human disagreement, from the new head.
+  \item $U$ --- \emph{model} uncertainty, from the spread of latent samples.
+\end{itemize}
+
+\paragraph{Hypothesis.}
+\begin{itemize}
+  \item Explicit spatial supervision of inter-rater disagreement makes the
+        model's predictive diversity land where humans actually disagree
+        ($U\approx D^{GT}$), without degrading segmentation quality.
+  \item Stated as two testable claims: (1) the head can predict disagreement,
+        $\hat D\approx D^{GT}$; (2) the alignment loss improves $U$ vs.\ $D^{GT}$
+        agreement over the baseline.
+\end{itemize}
+
+\paragraph{Alternatives we considered and rejected.}
+\begin{itemize}
+  \item \textbf{Condition the prior on disagreement}, $p(z\mid x,\hat D)$.
+        Rejected: $\hat D$ is itself a function of $x$, so it adds no new
+        information and muddies the ablation.
+  \item \textbf{A second encoder for the disagreement head.} Rejected: start
+        with the minimal $1\times1$ conv so any gain is attributable to the
+        \emph{supervision}, not to extra capacity.
+% >>> UPDATED (1/5): third alternative replaced with one from the literature
+  \item \new{\textbf{One output head per annotator}, as in the ``who said what''
+        line of work on learning from multiple labellers~\cite{guan2018}: predict
+        $G$ masks and let each head specialise to one rater, so disagreement falls
+        out of the spread between heads. Rejected for a dataset-specific reason.
+        In LIDC each scan is read by four of twelve radiologists, and the release
+        we use matches graders across images by \emph{overlapping bounding boxes},
+        not by identity --- so ``grader 3'' in one crop is generally a different
+        person than ``grader 3'' in another. Per-annotator heads would be fitting
+        a rater identity that the labels do not carry. Our disagreement map is
+        permutation-invariant over the four masks and so avoids the problem.}
+\end{itemize}
+
+% ===============================================================
+\section{Methodology}
+
+\paragraph{Model.}
+\begin{itemize}
+  \item Faithful PyTorch re-implementation of the Probabilistic U-Net (the
+        official repo is old TensorFlow and does not run on current Colab).
+  \item Baseline architecture unchanged: U-Net backbone, prior encoder,
+        posterior encoder, latent $z$, \texttt{fcomb}-style injection of $z$
+        into the decoder features.
+  \item Our additions are isolated in a subclass so the baseline stays runnable
+        for a controlled comparison.
+\end{itemize}
+
+\paragraph{Data.}
+\begin{itemize}
+  \item LIDC-IDRI 2D crops, DeepMind's preprocessed release (CC BY 3.0),
+        published with the Hierarchical Probabilistic U-Net.
+  \item Splits: 8843 train / 1993 val / 1980 test images
+        (530 / 111 / 103 patients); $180\times180$ 8-bit grayscale, four masks
+        each.
+  \item Preprocessing follows the paper's Appendix H.1; we take a random
+        $128\times128$ crop, scale images to $[0,1]$, and binarise masks.
+  \item \textbf{Honesty note for the report:} counts are $\sim$0.4\% below the
+        paper's 8882/1996/1992 because the authors cleaned the data after
+        publication. Cite the HPU-Net release and state the delta --- do not
+        claim byte-identical reproduction.
+  \item Roughly 65\% of training crops have at least one \emph{empty} mask ---
+        graders disagree on whether a lesion is present at all. That is signal,
+        and it is why the empty-mask convention in the metric matters.
+\end{itemize}
+
+\paragraph{Training.}
+\begin{itemize}
+  \item Loss: cross-entropy reconstruction + $\beta\,\mathrm{KL}$
+        ($\beta=1$, 6-D latent, per Appendix H.1), plus $\lambda_D L_D$ and
+        $\lambda_A L_{\text{align}}$ for variants B and C.
+  \item Optimizer Adam; the paper uses lr $10^{-4}$ decayed to $10^{-6}$ over
+        240k iterations, batch 32, weight decay $10^{-5}$, orthogonal init.
+% >>> UPDATED (2/5): real training setup; the "Colab subset" placeholder was wrong
+  \item \new{\textbf{Proof-of-concept scale.} This is a demonstration, not a
+        full reproduction. We train on the \emph{full} training split (8843
+        crops) at batch 32 with the paper's optimizer settings, but cut the
+        schedule to \textbf{100k iterations} against the paper's 240k to fit the
+        compute available --- $\approx$3.7\,h per run for A and B, 6.6\,h for C
+        on one GPU, and three models to train. The shortened schedule costs
+        accuracy: absolute GED lands above the published range, so we read only
+        the \emph{relative} ordering of A/B/C, all trained at an identical
+        budget. As a check that the shortfall is the budget and not the
+        implementation, one 240k run of the same code reached a validation GED of
+        $0.267$, inside the $\approx$0.25--0.30 band the paper reports for LIDC.}
+  \item $K=4$ latent samples per step during training; 16 samples per image at
+        test time.
+  \item \new{\textbf{Two stability measures were necessary.} We sum the
+        reconstruction cross-entropy over pixels, as the paper does; with a
+        \emph{mean} reduction the reconstruction term is $\sim$16k$\times$ smaller
+        than $\beta\,\mathrm{KL}$ at $128\times128$, which drove the posterior to
+        collapse onto the prior (KL $\to 0$ by 30k steps, sample diversity
+        $0.45\to0.006$). We also clip the gradient norm at 100, and detach the
+        prior inside the alignment loss: left attached, the cheapest way for
+        $L_{\text{align}}$ to raise sample diversity is to inflate the prior
+        variance, which made the KL double every step until it overflowed.}
+  \item Tools: Python, PyTorch, NumPy, Matplotlib.
+\end{itemize}
+
+\paragraph{Ablation design (three models, one variable at a time).}
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Model & Disagreement head & Alignment loss & Objective \\
+\midrule
+A -- baseline PU-Net & no  & no  & $L_{\text{PU-Net}}$ \\
+B -- + disagreement  & yes & no  & $+\lambda_D L_D$ \\
+C -- full model      & yes & yes & $+\lambda_D L_D+\lambda_A L_{\text{align}}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+% >>> UPDATED (3/5): the lambda values we actually used, and why the sweep was dropped
+\begin{itemize}
+  \item \new{We use $\lambda_D=10^{-2}$ and $\lambda_A=10^{-5}$. These look far
+        smaller than the $\{0.1,0.5,1.0\}$ we first planned because $L_D$ and
+        $L_{\text{align}}$ are summed over pixels to match the reconstruction
+        term; at $\lambda_D=0.5$ the auxiliary loss is $3\times$ the
+        reconstruction, and $\lambda_A=10^{-4}$ diverges outright.}
+  \item \new{We did not sweep $\lambda_A$ further. Probes at $10^{-3}$ and
+        $10^{-4}$ plus the full-length runs show the effect on
+        $\mathrm{corr}(U,D^{GT})$ saturating at $\approx\!+0.02$ while the Dice
+        cost grows monotonically (Dice $0.30\to0.12$ at $\lambda_A=10^{-3}$), so
+        additional points would not change the conclusion.}
+\end{itemize}
+
+% ===============================================================
+\section{Results and analysis}
+\label{sec:results}
+
+\paragraph{Metrics (say what each one is for).}
+\begin{itemize}
+  \item \textbf{Dice / IoU} --- sanity check that the extension does not damage
+        segmentation quality. \emph{Not} the headline claim.
+        \new{Empty prediction against empty grader is excluded rather than scored
+        zero --- the same convention as below, and it matters because 65\% of
+        crops have at least one empty mask.}
+  \item \textbf{Generalized energy distance} (paper, Appendix B) --- compares
+        the sample distribution with the four-grader distribution:
+        \new{
+        \[
+          D^2_{\mathrm{GED}}
+          = 2\,\mathrm{E}\!\left[d(S,Y)\right]
+            - \underbrace{\mathrm{E}\!\left[d(S,S')\right]}_{\text{sample diversity}}
+            - \mathrm{E}\!\left[d(Y,Y')\right],
+          \qquad d = 1-\mathrm{IoU},
+        \]
+        with $d\equiv0$ when both masks are empty, so agreement on lesion
+        absence is rewarded --- which matters here because 65\% of crops contain
+        an empty mask. Note the middle term: GED \emph{credits} a model for
+        sample diversity, but only in aggregate, and says nothing about
+        \emph{where} that diversity falls. That blind spot is what our extension
+        targets, and we report $\mathrm{E}[d(S,S')]$ separately below.}
+  \item \textbf{Disagreement MAE}, $\frac{1}{HW}\sum_i|U_i-D_i^{GT}|$ --- lower
+        is better.
+  \item \textbf{Disagreement correlation}, $\mathrm{corr}(U,D^{GT})$ --- higher
+        means the model is uncertain in the same places humans are. \textbf{This
+        is the primary result.}
+  \item \new{\textbf{Nestedness} --- the fraction of test images whose 16 samples
+        are all nested inside one another. This is a diagnostic we added, and it
+        turned out to decide the whole story.}
+\end{itemize}
+
+% >>> UPDATED (4/5): entire results section written from the finished runs
+\paragraph{Main table.}
+\new{All numbers are on the held-out \textbf{test} split (1980 images, 16 samples
+per image), with all three models trained for an identical 100k iterations.}
+\begin{center}
+\begin{tabular}{lcccccc}
+\toprule
+Model & Dice $\uparrow$ & IoU $\uparrow$ & GED $\downarrow$ &
+  Dis.\ MAE $\downarrow$ & Dis.\ corr.\ $\uparrow$ & Nested $\downarrow$ \\
+\midrule
+A -- baseline & \new{\textbf{0.355}} & \new{\textbf{0.280}} & \new{0.394} & \new{0.020} & \new{0.483} & \new{1\%} \\
+B -- + head   & \new{0.308} & \new{0.241} & \new{0.403} & \new{0.018} & \new{0.492} & \new{3\%} \\
+C -- full     & \new{0.340} & \new{0.267} & \new{\textbf{0.388}} & \new{\textbf{0.018}} & \new{\textbf{0.509}} & \new{1\%} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\new{The disagreement correlation orders cleanly A $<$ B $<$ C, and C reaches the
+best correlation with the \emph{best} GED of the three, at a 4\% Dice cost
+against A. Sample diversity $\mathrm{E}[d(S,S')]$ is $0.69$ for C, slightly above
+A's $0.68$ --- the alignment loss relocates diversity without suppressing it.}
+
+\paragraph{\new{A defect we had to fix first, and the diagnostic that caught it.}}
+\new{Our first full-length runs showed \emph{no} effect from the alignment loss:
+all three models sat within $0.01$ of each other on $\mathrm{corr}(U,D^{GT})$.
+The cause was architectural. Our \texttt{fcomb} registered LeakyReLU activations
+between its three $1\times1$ convolutions but never applied them, so the stack
+collapsed to a single affine map. Since $z$ enters as a spatially constant
+vector, the class-logit difference is then
+\[
+  (\text{out}_1-\text{out}_0)(x,y) = S(x,y) + c(z),
+\]
+a fixed spatial function plus a scalar. Thresholding that gives level sets of one
+function, so \emph{every sample is nested inside every other}: $z$ can only
+dilate or erode the mask globally, never move one part of a boundary and leave
+the rest. Measuring nestedness confirmed it --- \textbf{100\% of test images}, in
+all three models. The alignment loss was being asked to place diversity
+spatially in an architecture with a single degree of freedom. With the
+activations applied, nestedness falls to the 1--3\% in the table above and the
+ordering above appears. We report this because it is the most transferable thing
+we learned: a null result is not evidence against a hypothesis until the model
+can express the effect at all.}
+
+\paragraph{\new{Can the head beat a trivial predictor?}}
+\new{Inter-rater disagreement in LIDC concentrates on lesion boundaries, so a
+head that merely outlined its own segmentation would already score well. We
+therefore compare $\hat D$ against exactly that control --- the morphological
+boundary band of the model's own predicted mask, which uses no disagreement
+supervision at all. The head clears it by a wide margin, $0.627$ vs.\ $0.425$.
+This is the clearest positive result in the project.}
+
+\paragraph{Qualitative figure (one figure, chosen deliberately).}
+\begin{itemize}
+  \item Rows: input CT crop; the four human masks; $D^{GT}$; baseline samples
+        and $U_{\text{baseline}}$; full-model samples and $U_{\text{ours}}$;
+        predicted $\hat D$.
+  \item Pick cases where graders agree on the lesion interior but argue about
+        the boundary --- that is where the baseline and our model should visibly
+        differ.
+  \item [\todo{TODO}] Also show one case where at least one grader saw no lesion at all.
+\end{itemize}
+
+\paragraph{Discussion.}
+\begin{itemize}
+  \item \new{\textbf{The head learns more than an outline.} It beats the
+        boundary-band control by $+0.18$, so it is not simply tracing its own
+        prediction, nor collapsing to a constant.}
+  \item \new{\textbf{$L_{\text{align}}$ does not trade diversity for location.}
+        Model C has both the best GED and the highest sample diversity of the
+        three, so the gain in $\mathrm{corr}(U,D^{GT})$ is not bought by
+        shrinking the distribution --- the middle term of $D^2_{\mathrm{GED}}$
+        rises rather than falls.}
+  \item \new{\textbf{The objective is partly mismatched to LIDC.} $D^{GT}$
+        averages $0.72$ over the lesion body and $0.36$ deep inside the eroded
+        majority mask, because 65\% of crops contain a grader who saw no lesion:
+        here disagreement is largely about \emph{existence}, not boundary
+        placement. Matching $U$ to $D^{GT}$ therefore asks the model to sit at
+        $p\approx0.5$ across whole lesions, in direct conflict with the
+        reconstruction term --- which is why Dice collapses at larger
+        $\lambda_A$. Restricting $L_{\text{align}}$ to a boundary band is the
+        obvious next step.}
+  \item \new{\textbf{Failure cases and challenges.} Posterior collapse from the
+        loss-reduction convention; NaN divergence of the prior encoder from
+        unclipped gradients and from the alignment loss inflating the prior
+        variance; the $4\times$ training cost of decoding $K$ samples per step
+        (15.4\,h vs.\ 7.7\,h for model C); and best-GED checkpoint selection,
+        which picks step 1000--3000 --- barely-trained models --- so we
+        report all variants at a matched 100k steps instead.}
+\end{itemize}
+
+% ===============================================================
+% >>> UPDATED (5/5): conclusion written from the results
+\section{Conclusion}
+\begin{itemize}
+  \item \new{\textbf{Finding 1 (head).} The model can predict where annotators
+        disagree: $\mathrm{corr}(\hat D,D^{GT})=0.627$ against a $0.425$
+        image-only control that uses no disagreement supervision.}
+  \item \new{\textbf{Finding 2 (alignment).} Aligning sample diversity with
+        disagreement gives a small but consistent gain,
+        $\mathrm{corr}(U,D^{GT})$ $0.483\to0.509$, and once the latent can vary
+        spatially it comes with the best GED of the three models rather than a
+        penalty. The gain is real but modest, and we do not claim more.}
+  \item \new{\textbf{Finding 3 (the substantive one).} The extension first
+        appeared to do nothing. The cause was architectural: an unapplied
+        nonlinearity made our latent injection affine, forcing 100\% of sampled
+        segmentations to be nested and leaving the alignment loss a single
+        degree of freedom. Diagnosing \emph{why} a plausible method produced no
+        effect is the part of this project we would most defend.}
+  \item \textbf{The claim to make:} the baseline generates diverse
+        plausible segmentations; our extension makes that diversity correspond
+        to where experts actually disagree. \emph{Not} ``our Dice is higher''.
+  \item \textbf{Limitations:} \new{one seed per configuration, so a $+0.026$
+        gap carries no error bar; proof-of-concept scale at 100k iterations
+        rather than the paper's 240k, so absolute GED is above the published
+        range and only the \emph{relative} ordering of A/B/C is meaningful;}
+        one dataset, one anatomy; disagreement entropy from only four graders is
+        a coarse estimate.
+  \item \textbf{Future work:} \new{restrict $L_{\text{align}}$ to boundary
+        regions so it stops demanding maximal uncertainty over whole lesions;
+        train to the paper's full 240k budget now that the architecture is
+        corrected;} more graders or soft labels; test on another
+        multi-rater dataset; compare against the Hierarchical Probabilistic U-Net.
+\end{itemize}
+
+% ===============================================================
+\begin{thebibliography}{9}
+\bibitem{kohl2018}
+S.~A.~A. Kohl et al.,
+\emph{A Probabilistic U-Net for Segmentation of Ambiguous Images},
+NeurIPS 2018. arXiv:1806.05034.
+
+\bibitem{kohl2019}
+S.~A.~A. Kohl et al.,
+\emph{A Hierarchical Probabilistic U-Net for Modeling Multi-Scale Ambiguity},
+2019. arXiv:1905.13077. (Source of the preprocessed LIDC crops we use.)
+
+\bibitem{lidc}
+S.~G. Armato~III et al.,
+\emph{The Lung Image Database Consortium (LIDC) and Image Database Resource
+Initiative (IDRI): A Completed Reference Database of Lung Nodules on CT Scans},
+Medical Physics, 2011.
+
+\bibitem{guan2018}
+M.~Y. Guan, V.~Gulshan, A.~M. Dai, G.~E. Hinton,
+\emph{Who Said What: Modeling Individual Labelers Improves Classification},
+AAAI 2018.
+
+\bibitem{ronneberger2015}
+O.~Ronneberger, P.~Fischer, T.~Brox,
+\emph{U-Net: Convolutional Networks for Biomedical Image Segmentation},
+MICCAI 2015.
+\end{thebibliography}
+
+
+\end{document}

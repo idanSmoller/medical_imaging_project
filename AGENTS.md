@@ -243,3 +243,30 @@ Append dated entries. Keep them short — what changed and what the next agent s
   KL, and old alignment. `--distribution-mode coverage` implements plan §8.2 and
   `--distribution-mode kernel` implements §8.3, both with soft Dice distances.
   CPU smoke-tested both modes for one step under `outputs/distribution_smoke/`.
+- **2026-08-18 (Claude):** Distribution-matching arm finished (both modes, 100k,
+  GPUs 2/3) and evaluated on test. **It is a negative result: best dice of any
+  arm (0.4383 coverage), worst GED of any arm (0.7135 / 0.9329), and
+  `E[d(S,S')]` = 0.024 / 0.0004 with 99–100% nested — the samples collapse to a
+  single mask.** Numbers and the mechanism are in RESULTS.md §4b; do not "fix" it
+  with a different τ, it needs an explicit diversity term or the KL back.
+  `scripts/eval_lidc_final.py` gained two lines for this: `"distribution"` added
+  to the disagreement-head gate (it was silently reporting `pred_corr = n/a`), and
+  rows now label by run directory so `coverage`/`kernel` don't both print as
+  `distribution`. Also generated `outputs_fcombfix/figures_100k/` (qualitative
+  grids from the *reported* 100k checkpoints; the ones in
+  `outputs_12_08_26_240000/figures/` are from the affine arm).
+  **Report decision: the fcomb-fixed arm stays the headline extension and the
+  distribution arm is reported as a fourth arm / negative result.** The full
+  6-page report now lives in `overleaf/` (`main.tex` + `figure_model.tex` +
+  `figs/`, compiles clean with pdflatex at 10pt). Open item before submission:
+  `notebooks/disagreement_aware_probunet_colab.ipynb` predates the distribution
+  variant, so it does not contain arm D — either port it or scope the notebook's
+  claim in the report.
+  Also added **`scripts/make_figure_assets.py`**, which `overleaf/figure_model.tex`
+  had referenced for months without it existing. It renders every thumbnail of the
+  architecture figure from one test crop (`LIDC-IDRI-0217/z-129.0_c0`) and the
+  reported `full` checkpoint. Before this, `U`, `D_hat` and the predicted
+  segmentation were hand-drawn rings/blobs sitting next to a *real* `D_GT`, which
+  implied a match the model does not achieve; and the `Q^(k)` thumbnails were
+  argmax masks although `U` is the entropy of the mean **softmax probability**.
+  Rerun it if the reported checkpoint changes.
