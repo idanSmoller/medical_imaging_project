@@ -10,8 +10,8 @@
 % Every coordinate here was checked numerically (no box overlaps, no line
 % through a thumbnail or a label) and rendered to a raster preview before
 % being committed. There is exactly ONE line-line crossing, at (16.00,-1.20):
-% it is unavoidable, because the extension sits right of the grader masks so
-% anything fed from the U-Net must cross the graders -> D^GT arrow.
+% it is unavoidable, because the extension sits right of the expert masks so
+% anything fed from the U-Net must cross the experts -> D^GT arrow.
 % If you move something, keep the routes orthogonal and re-check by eye.
 %
 % EVERY thumbnail is real data, written by
@@ -109,7 +109,7 @@
 \node[pic] at (10.90,-1.20) {\includegraphics[width=12mm]{figs/pred}};
 \node[lbl,align=center] at (10.90,-2.13) {Predicted\\segmentation};
 
-% the four graders; the one drawn at random as Y_g is outlined in green
+% the four experts; the one drawn at random as Y_g is outlined in green
 \node[pic] at (12.90,-0.88) {\includegraphics[width=6mm]{figs/mask0}};
 \node[pic] at (13.52,-0.88) {\includegraphics[width=6mm]{figs/mask1}};
 \node[pic] at (12.90,-1.50) {\includegraphics[width=6mm]{figs/mask2}};
@@ -179,7 +179,7 @@
 % about two thirds of a text block.
 \caption{\textbf{The disagreement-aware Probabilistic U-Net (training).}
 Outside the dashed box, the original model: the posterior sees the image and
-\emph{one} randomly drawn grader $Y_g$ (green outline), and the sampled $z$
+\emph{one} randomly drawn expert $Y_g$ (green outline), and the sampled $z$
 (green block, 6 channels) is concatenated to the last U-Net activation
 (32 channels). The three $1{\times}1$ convolutions of $f_{\text{comb}}$ combine
 them.
@@ -189,7 +189,7 @@ each draw a fresh $z_k$ from the \emph{prior}. \textbf{Every thumbnail is
 real}, from test crop \texttt{LIDC-IDRI-0217} decoded by our trained full model
 and zoomed to the nodule; $\Dgt$, $U$ and $\hat D$ share one $[0,1]$ colour
 scale, so they can be compared directly. The three $Q^{(k)}$ shown are non-empty
-draws: 8 of the 16 samples for this crop are empty, though all four graders
+draws: 8 of the 16 samples for this crop are empty, though all four experts
 segmented the nodule.}
 \label{fig:model}
 \end{figure}
