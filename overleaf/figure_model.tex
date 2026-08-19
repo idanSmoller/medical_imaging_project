@@ -181,15 +181,15 @@
 Outside the dashed box, the original model: the posterior sees the image and
 \emph{one} randomly drawn grader $Y_g$ (green outline), and the sampled $z$
 (green block, 6 channels) is concatenated to the last U-Net activation
-(32 channels) and the three $1{\times}1$ convolutions of $f_{\text{comb}}$ combine
-them; block width reads as channel count.
-Inside the box, our extension. Two things the drawing encodes: $F(x)$ is tapped
-\emph{before} $z$, so $\hat D$ depends on the image alone; and the $K$ passes
-behind $U$ draw fresh $z_k$ from the \emph{prior}. \textbf{Every thumbnail is
+(32 channels). The three $1{\times}1$ convolutions of $f_{\text{comb}}$ combine
+them.
+Inside the box, our extension. Note that $F(x)$ is taken \emph{before} $z$ is
+added, so $\hat D$ depends on the image alone, and that the $K$ passes behind $U$
+each draw a fresh $z_k$ from the \emph{prior}. \textbf{Every thumbnail is
 real}, from test crop \texttt{LIDC-IDRI-0217} decoded by our trained full model
 and zoomed to the nodule; $\Dgt$, $U$ and $\hat D$ share one $[0,1]$ colour
 scale, so they can be compared directly. The three $Q^{(k)}$ shown are non-empty
-draws --- 8 of the 16 samples for this crop are empty, though all four graders
+draws: 8 of the 16 samples for this crop are empty, though all four graders
 segmented the nodule.}
 \label{fig:model}
 \end{figure}

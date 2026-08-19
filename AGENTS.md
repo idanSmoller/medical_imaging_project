@@ -286,3 +286,14 @@ Append dated entries. Keep them short — what changed and what the next agent s
   `history.csv` and are sound.
   Also: `overleaf/main.tex` is now the **prose** report (6 pages, compiles clean);
   the bullet-point version is kept as `overleaf/main_bullets.tex.bak`.
+- **2026-08-19 (Claude), report scope change:** The submitted report now covers
+  **three arms only (A/B/C)** — the collaborator removed the distribution-matching
+  arm D from `overleaf/main.tex`. Arm D's runs, numbers and analysis are unchanged
+  and remain in RESULTS.md §4b; only the write-up dropped it. `overleaf/main.tex`
+  is prose, 6 pages, and was rewritten against ~18 inline `% Q:` review comments.
+  Two edits made while removing arm D had broken the build and are fixed: a
+  literal TAB had replaced the `\t` of `\text` in `$L_{\text{align}}$`, and
+  deleting the `gao2023` entry also deleted `\end{thebibliography}}`.
+  **When editing `overleaf/main.tex`, hand back targeted edits, not whole-file
+  rewrites** — the collaborator edits the same file in Overleaf, and Overleaf
+  comments are anchored to text ranges, so a wholesale replacement orphans them.
